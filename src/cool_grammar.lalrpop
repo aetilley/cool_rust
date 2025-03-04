@@ -1,0 +1,33 @@
+// build.rs uses this language specification to generate the parser ('cool_grammar.rs').
+
+use crate::token::{Token, LexicalError};
+use crate::ast::{Program, Classes, Class, mk_class, mk_program};
+
+grammar;
+
+extern {
+  type Location = usize;
+  type Error = LexicalError;
+  enum Token{
+    "any" => Token::Error(_),
+    ";" => Token::Semicolon,
+    "class" => Token::Class,
+  }
+}
+
+pub ProgramTy: Program = {
+  <clist: ClassListTy> => mk_program(clist),
+}
+
+pub ClassListTy: Classes = {
+  <c: ClassTy> ";" => vec![c],
+  <c: ClassTy> ";" <clist: ClassListTy> => {
+    let mut res = clist.clone();
+    res.push(c);
+    res
+    },
+}
+
+pub ClassTy: Class = {
+  "class" => mk_class(),
+}

@@ -3,8 +3,8 @@ use std::path::Path;
 use std::fs::File;
 use std::io::Read;
 
-mod token;
-use token::{tokenize_all, Token};
+use cool_rust::ast::{parse, Program};
+
 
 fn main() {
 
@@ -23,9 +23,18 @@ fn main() {
         Ok(_) => (), 
     }
 
-    let result: Vec::<Token> = tokenize_all(&code);
-    for token in result {
-        print!("{}\n", token);
-    }
+    // Tokenize
+    // let result: Vec::<Token> = tokenize_all(&code);
+    // for token in result {
+    //     print!("{}\n", token);
+    // }
+
+    // Parse
+    let program: Program = parse(&code).expect("Main program did not parse.");
+
+    // TODO Implement Display for Program.
+    print!("{:?}\n", program)
+
+
     
 }

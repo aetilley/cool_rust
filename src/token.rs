@@ -186,14 +186,14 @@ pub struct CoolLexer<'input> {
     token_stream: SpannedIter<'input, Token>,
 }
 
-// impl<'input> CoolLexer<'input> {
-//     pub fn new(input: &'input str) -> Self {
-//         // the Token::lexer() method is provided by the Logos trait
-//         Self {
-//             token_stream: Token::lexer(input).spanned(),
-//         }
-//     }
-// }
+impl<'input> CoolLexer<'input> {
+    pub fn new(input: &'input str) -> Self {
+        // the Token::lexer() method is provided by the Logos trait
+        Self {
+            token_stream: Token::lexer(input).spanned(),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub enum LexicalError {
@@ -215,7 +215,7 @@ impl Iterator for CoolLexer<'_> {
 
 #[cfg(test)]
 mod lex_tests {
-    use super::*;
+    //use super::*;
 
 
 
