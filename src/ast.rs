@@ -1,3 +1,5 @@
+#![allow(clippy::self_named_constructors)]
+
 use std::fmt::Debug;
 
 use crate::cool_grammar::ProgramTyParser;

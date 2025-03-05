@@ -10,15 +10,14 @@ fn main() {
     let path = Path::new(&user_args[1]);
     let display = path.display();
 
-    let mut file = match File::open(&path) {
+    let mut file = match File::open(path) {
         Err(why) => panic!("couldn't open {}: {}", display, why),
         Ok(file) => file,
     };
 
     let mut code = String::new();
-    match file.read_to_string(&mut code) {
-        Err(why) => panic!("couldn't read {}: {}", display, why),
-        Ok(_) => (),
+    if let Err(why) = file.read_to_string(&mut code) {
+        panic!("couldn't read {}: {}", display, why);
     }
 
     // Tokenize
@@ -31,5 +30,5 @@ fn main() {
     let program: Program = parse(&code).expect("Main program did not parse.");
 
     // TODO Implement Display for Program.
-    print!("{:?}\n", program)
+    println!("{:?}", program)
 }

@@ -90,7 +90,7 @@ pub enum Token {
     #[regex("[0-9]+", |lex| lex.slice().to_string())]
     IntConst(String),
 
-    #[regex("true|false", |value| {if value.slice() == "true" {true} else {false}})]
+    #[regex("true|false", |value| value.slice() == "true")]
     BoolConst(bool),
 
     #[regex("\"[^\"\0]*\"", str_const_callback)]
@@ -161,9 +161,9 @@ impl fmt::Display for Token {
 }
 
 pub fn tokenize_all(input: &str) -> Vec<Token> {
-    let mut lexer = Token::lexer(input).spanned();
+    let lexer = Token::lexer(input).spanned();
     let mut result = vec![];
-    while let Some(inner) = lexer.next() {
+    for inner in lexer {
         let tok = match inner {
             (Err(_), span) => panic!("Lexing error between bytes {} and {}", span.start, span.end),
             (Ok(raw), _) => raw,
