@@ -3,7 +3,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use cool_rust::ast::{parse, Program};
+use cool_rust::ast::Program;
+use cool_rust::ast::Parse;
 
 fn main() {
     let user_args: Vec<String> = env::args().collect();
@@ -27,7 +28,7 @@ fn main() {
     // }
 
     // Parse
-    let program: Program = parse(&code).expect("Main program did not parse.");
+    let program: Program = Program::parse(&code).expect("Main program did not parse.");
 
     // TODO Implement Display for Program.
     println!("{:?}", program)
