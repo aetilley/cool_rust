@@ -82,11 +82,6 @@ pub enum Token {
 
     // Identifiers and Constants.
     // TODO!  Note that we should add these to as symbol table as some point.
-    #[regex("true")]
-    True,
-
-    #[regex("false")]
-    False,
 
     #[regex("[A-Z][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     TypeId(String),
@@ -96,6 +91,9 @@ pub enum Token {
 
     #[regex("[0-9]+", |lex| lex.slice().to_string())]
     IntConst(String),
+
+    #[regex("true|false", |value| {if value.slice() == "true" {true} else {false}})]
+    BoolConst(bool),
 
     #[regex("\"[^\"\0]*\"", str_const_callback)]
     StrConst(String),

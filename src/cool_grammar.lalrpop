@@ -1,7 +1,7 @@
 // build.rs uses this language specification to generate the parser ('cool_grammar.rs').
 
 use crate::token::{Token, LexicalError};
-use crate::ast::{Program, Classes, Class, mk_class, mk_program};
+use crate::ast::{Program, Classes, Class, Features, Feature, Expr, Formals, Formal};
 
 grammar;
 
@@ -11,23 +11,75 @@ extern {
   enum Token{
     "any" => Token::Error(_),
     ";" => Token::Semicolon,
+    ":" => Token::Colon,
     "class" => Token::Class,
+    "typeid" => Token::TypeId(<String>),
+    "objectid" => Token::ObjectId(<String>),
+    "bool_const" => Token::BoolConst(<bool>),
+    "{" => Token::LCurly,
+    "}" => Token::RCurly,
+    "(" => Token::LParen,
+    ")" => Token::RParen,
+    "<-" => Token::Assign,
+    "," => Token::Comma,
   }
 }
 
 pub ProgramTy: Program = {
-  <clist: ClassListTy> => mk_program(clist),
-}
-
-pub ClassListTy: Classes = {
-  <c: ClassTy> ";" => vec![c],
-  <c: ClassTy> ";" <clist: ClassListTy> => {
-    let mut res = clist.clone();
-    res.push(c);
-    res
-    },
+  <clist: ClassesTy> => Program::program(clist),
 }
 
 pub ClassTy: Class = {
-  "class" => mk_class(),
+  "class" <name: "typeid"> "{" <features: FeaturesTy> "}" ";"=> Class::class(name, features),
+}
+pub ClassesTy: Classes = {
+  <c: ClassTy> => vec![c],
+  <cs: ClassesTy> <c: ClassTy> => {
+    let mut res = cs.clone();
+    res.push(c);
+    res
+  },
+}
+
+pub FormalTy: Formal = {
+  <name: "objectid"> ":" <typ: "typeid">  => Formal::formal(name, typ),
+}
+
+pub _SomeFormalsTy: Formals = {
+  <f: FormalTy> => vec![f],
+  <some: _SomeFormalsTy> "," <f: FormalTy> => {
+    let mut res = some.clone();
+    res.push(f);
+    res
+  }
+}
+
+pub FormalsTy: Formals = {
+  () => vec![],
+  <some: _SomeFormalsTy> => some,
+}
+
+
+pub FeatureTy: Feature = {
+  <name: "objectid"> ":" <typ: "typeid"> ";" => Feature::attr(name, typ, Expr::no_expr()),
+  <name: "objectid"> ":" <typ: "typeid"> "<-" <expr: ExprTy> ";" => Feature::attr(name, typ, expr),
+  <name: "objectid"> "(" <formals: FormalsTy> ")" ":" <typ: "typeid"> "{" <expr: ExprTy> "}" ";" => Feature::method(name, formals, typ, expr), 
+}
+pub FeaturesTy: Features = {
+  () => vec![],
+  <fs: FeaturesTy> <f: FeatureTy>  => {
+    let mut res = fs.clone();
+    res.push(f);
+    res
+  },
+}
+
+pub BoolConstTy: bool = {
+  <value: "bool_const"> => value,
+}
+
+
+pub ExprTy: Expr = {
+  <name: "objectid"> => Expr::object(name),
+  <value: BoolConstTy> => Expr::bool_const(value),
 }
