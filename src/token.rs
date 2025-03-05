@@ -2,26 +2,25 @@
 
 use std::fmt;
 
-use logos::{Logos, SpannedIter, Lexer};
+use logos::{Lexer, Logos, SpannedIter};
 
 fn str_const_callback(lex: &mut Lexer<Token>) -> String {
-    let lex = lex.slice().to_string(); 
+    let lex = lex.slice().to_string();
     // TODO! Check length and handle backslashes.
     lex
 }
 
 fn error_callback(lex: &mut Lexer<Token>) -> String {
-    let lex = lex.slice().to_string(); 
+    let lex = lex.slice().to_string();
     // TODO! Check length and handle backslashes.
     format!("Error trying to lex at character {}", lex)
 }
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"[ \t\n\f\r]+|--(.)*\n")] // Ignore Whitespace and double dash comments.
-// TODO!:  UNHANDLED are multiline comments.  This might be harder in Logos than in Flex.  Might
-// Need to do a pre-pass just for multiline comments.
+                                        // TODO!:  UNHANDLED are multiline comments.  This might be harder in Logos than in Flex.  Might
+                                        // Need to do a pre-pass just for multiline comments.
 pub enum Token {
-
     // Special symbols
     #[regex(r"\(")]
     LParen,
@@ -82,7 +81,6 @@ pub enum Token {
 
     // Identifiers and Constants.
     // TODO!  Note that we should add these to as symbol table as some point.
-
     #[regex("[A-Z][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     TypeId(String),
 
@@ -120,7 +118,7 @@ pub enum Token {
 
     #[regex("isvoid")]
     IsVoid,
-   
+
     #[regex("let")]
     Let,
 
@@ -153,7 +151,7 @@ pub enum Token {
 
     // Error
     #[regex(".", error_callback, priority = 1)]
-    Error(String)
+    Error(String),
 }
 
 impl fmt::Display for Token {
@@ -162,13 +160,13 @@ impl fmt::Display for Token {
     }
 }
 
-pub fn tokenize_all(input: &str) -> Vec::<Token> {
+pub fn tokenize_all(input: &str) -> Vec<Token> {
     let mut lexer = Token::lexer(input).spanned();
     let mut result = vec![];
     while let Some(inner) = lexer.next() {
         let tok = match inner {
-            (Err(_), span) => panic!("Lexing error between bytes {} and {}", span.start, span.end), 
-            (Ok(raw), _)=> raw 
+            (Err(_), span) => panic!("Lexing error between bytes {} and {}", span.start, span.end),
+            (Ok(raw), _) => raw,
         };
         result.push(tok);
     }
@@ -214,7 +212,4 @@ impl Iterator for CoolLexer<'_> {
 #[cfg(test)]
 mod lex_tests {
     //use super::*;
-
-
-
 }
