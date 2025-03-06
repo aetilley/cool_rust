@@ -1,5 +1,10 @@
+WIP!
+
 COOL Language manual:  https://theory.stanford.edu/~aiken/software/cool/cool-manual.pdf
 
-Status:  Currently Parsing some things.
+Status:  Currently parsing most things.
+Next up:  Semantic Analysis
 
-Usage:  `cargo run -- simple.cl`
+Usage:  
+`cargo test`
+`cargo run -- simple.cl`

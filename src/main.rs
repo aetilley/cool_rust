@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use cool_rust::ast::Program;
 use cool_rust::ast::Parse;
+use cool_rust::ast::Program;
 
 fn main() {
     let user_args: Vec<String> = env::args().collect();
@@ -21,7 +21,8 @@ fn main() {
         panic!("couldn't read {}: {}", display, why);
     }
 
-    // Tokenize
+    //Tokenize (TODO:  Create a flag to trigger this only.)
+    // use cool_rust::token::{Token, tokenize_all};
     // let result: Vec::<Token> = tokenize_all(&code);
     // for token in result {
     //     print!("{}\n", token);
@@ -30,6 +31,6 @@ fn main() {
     // Parse
     let program: Program = Program::parse(&code).expect("Main program did not parse.");
 
-    // TODO Implement Display for Program.
+    //TODO Implement Display for Program.
     println!("{:?}", program)
 }

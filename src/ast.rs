@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use crate::cool_grammar::{FeatureTyParser, ProgramTyParser};
-use crate::token::{CoolLexer, LexicalError, Token};
+use crate::token::{strip_long_comments, CoolLexer, LexicalError, Token};
 
 use lalrpop_util::ParseError;
 
@@ -22,7 +22,8 @@ impl Program {
 }
 impl Parse for Program {
     fn parse(code: &str) -> Result<Self, ParseError<usize, Token, LexicalError>> {
-        let lexer = CoolLexer::new(code);
+        let stripped = strip_long_comments(code).unwrap();
+        let lexer = CoolLexer::new(&stripped);
         let parser = ProgramTyParser::new();
         parser.parse(lexer)
     }
@@ -31,13 +32,18 @@ impl Parse for Program {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Class {
     name: String,
+    parent: String,
     features: Features,
 }
 pub type Classes = Vec<Class>;
 
 impl Class {
-    pub fn class(name: String, features: Features) -> Class {
-        Class { name, features }
+    pub fn class(name: String, parent: String, features: Features) -> Class {
+        Class {
+            name,
+            parent,
+            features,
+        }
     }
 }
 
@@ -84,18 +90,52 @@ impl Feature {
 }
 impl Parse for Feature {
     fn parse(code: &str) -> Result<Self, ParseError<usize, Token, LexicalError>> {
-        let lexer = CoolLexer::new(code);
+        let stripped = strip_long_comments(code).unwrap();
+        let lexer = CoolLexer::new(&stripped);
         let parser = FeatureTyParser::new();
         parser.parse(lexer)
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Case {
+    id: String,
+    typ: String,
+    expr: Expr,
+}
+pub type Cases = Vec<Case>;
+impl Case {
+    pub fn case(id: String, typ: String, expr: Expr) -> Self {
+        Case { id, typ, expr }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     NoExpr,
     Object(String),
     BoolConst(bool),
+    IntConst(String),
+    StrConst(String),
+    Dispatch(Box<Expr>, String, Exprs),
+    StaticDispatch(Box<Expr>, String, String, Exprs),
+    New(String),
+    TypCase(Box<Expr>, Cases),
+    Loop(Box<Expr>, Box<Expr>),
+    Block(Exprs),
+    Cond(Box<Expr>, Box<Expr>, Box<Expr>),
+    Assign(String, Box<Expr>),
+    Not(Box<Expr>),
+    IsVoid(Box<Expr>),
+    Comp(Box<Expr>),
+    Eq(Box<Expr>, Box<Expr>),
+    Leq(Box<Expr>, Box<Expr>),
+    Lt(Box<Expr>, Box<Expr>),
+    Plus(Box<Expr>, Box<Expr>),
+    Minus(Box<Expr>, Box<Expr>),
+    Times(Box<Expr>, Box<Expr>),
+    Divide(Box<Expr>, Box<Expr>),
 }
+pub type Exprs = Vec<Expr>;
 
 impl Expr {
     pub fn no_expr() -> Expr {
@@ -109,8 +149,91 @@ impl Expr {
     pub fn bool_const(value: bool) -> Expr {
         Expr::BoolConst(value)
     }
-}
 
+    pub fn int_const(value: String) -> Expr {
+        Expr::IntConst(value)
+    }
+
+    pub fn str_const(value: String) -> Expr {
+        Expr::StrConst(value)
+    }
+
+    pub fn dispatch(elem: Expr, meth_name: String, args: Exprs) -> Expr {
+        Expr::Dispatch(Box::<Expr>::new(elem), meth_name, args)
+    }
+
+    pub fn static_dispatch(elem: Expr, typ: String, meth_name: String, args: Exprs) -> Expr {
+        Expr::StaticDispatch(Box::<Expr>::new(elem), typ, meth_name, args)
+    }
+
+    pub fn new(typ: String) -> Expr {
+        Expr::New(typ)
+    }
+
+    pub fn typcase(expr: Expr, cases: Cases) -> Expr {
+        Expr::TypCase(Box::<Expr>::new(expr), cases)
+    }
+    pub fn r#loop(cond: Expr, body: Expr) -> Expr {
+        Expr::Loop(Box::<Expr>::new(cond), Box::<Expr>::new(body))
+    }
+
+    pub fn cond(pred: Expr, then_expr: Expr, else_expr: Expr) -> Expr {
+        Expr::Cond(
+            Box::<Expr>::new(pred),
+            Box::<Expr>::new(then_expr),
+            Box::<Expr>::new(else_expr),
+        )
+    }
+
+    pub fn block(body: Exprs) -> Expr {
+        Expr::Block(body)
+    }
+
+    pub fn assign(name: String, expr: Expr) -> Expr {
+        Expr::Assign(name, Box::<Expr>::new(expr))
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn not(expr: Expr) -> Expr {
+        Expr::Not(Box::<Expr>::new(expr))
+    }
+
+    pub fn isvoid(expr: Expr) -> Expr {
+        Expr::IsVoid(Box::<Expr>::new(expr))
+    }
+
+    pub fn comp(expr: Expr) -> Expr {
+        Expr::IsVoid(Box::<Expr>::new(expr))
+    }
+
+    pub fn lt(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Lt(Box::<Expr>::new(lhs), Box::<Expr>::new(rhs))
+    }
+
+    pub fn leq(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Leq(Box::<Expr>::new(lhs), Box::<Expr>::new(rhs))
+    }
+
+    pub fn eq(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Eq(Box::<Expr>::new(lhs), Box::<Expr>::new(rhs))
+    }
+
+    pub fn plus(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Plus(Box::<Expr>::new(lhs), Box::<Expr>::new(rhs))
+    }
+
+    pub fn minus(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Minus(Box::<Expr>::new(lhs), Box::<Expr>::new(rhs))
+    }
+
+    pub fn times(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Times(Box::<Expr>::new(lhs), Box::<Expr>::new(rhs))
+    }
+
+    pub fn divide(lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Divide(Box::<Expr>::new(lhs), Box::<Expr>::new(rhs))
+    }
+}
 
 #[cfg(test)]
 mod parse_tests {
@@ -121,17 +244,19 @@ mod parse_tests {
     fn test_simple_program() {
         let code: &str = r"
         class Apple {};
-        class Orange {};
+        class Orange: Bananas {};
         ";
         let result = Program::parse(code).expect("Text program failed to parse");
         let desired_result = Program {
             classes: vec![
                 Class {
                     name: "Apple".to_string(),
+                    parent: "Object".to_string(),
                     features: vec![],
                 },
                 Class {
                     name: "Orange".to_string(),
+                    parent: "Bananas".to_string(),
                     features: vec![],
                 },
             ],
@@ -211,6 +336,6 @@ mod parse_tests {
             baz(a: S0) : T0 {};
         ";
         let result = Feature::parse(code);
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err());
     }
 }

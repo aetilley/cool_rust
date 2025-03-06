@@ -50,10 +50,10 @@ pub enum Token {
     LT,
 
     #[regex(r"=")]
-    EQ,
+    Eq,
 
     #[regex(r"@")]
-    AT,
+    At,
 
     #[regex(r"\+")]
     Plus,
@@ -78,6 +78,9 @@ pub enum Token {
 
     #[regex(r"<-")]
     Assign,
+
+    #[regex("~")]
+    Comp,
 
     // Identifiers and Constants.
     // TODO!  Note that we should add these to as symbol table as some point.
@@ -160,8 +163,94 @@ impl fmt::Display for Token {
     }
 }
 
+#[derive(Debug)]
+pub struct CommentError {
+    pub msg: String,
+}
+
+pub fn strip_long_comments(input: &str) -> Result<String, CommentError> {
+    if input.is_empty() {
+        return Ok(input.to_string());
+    }
+    let mut chars = input.chars();
+    let mut curr = chars.next().unwrap();
+    let mut look = chars.next();
+
+    let mut comment_depth: i32 = 0;
+    let mut result = String::from("");
+    loop {
+        if curr == '(' {
+            match look {
+                Some('*') => {
+                    comment_depth += 1;
+                    (curr, look) = match chars.next() {
+                        None => break,
+                        Some(c) => (c, chars.next()),
+                    }
+                }
+                Some(l) => {
+                    if comment_depth == 0 {
+                        result.push(curr);
+                    }
+                    (curr, look) = (l, chars.next());
+                }
+                None => {
+                    if comment_depth == 0 {
+                        result.push(curr);
+                    };
+                    break;
+                }
+            }
+        } else if curr == '*' {
+            match look {
+                Some(')') => {
+                    comment_depth -= 1;
+                    (curr, look) = match chars.next() {
+                        None => break,
+                        Some(c) => (c, chars.next()),
+                    }
+                }
+                Some(l) => {
+                    if comment_depth == 0 {
+                        result.push(curr);
+                    }
+                    (curr, look) = (l, chars.next());
+                }
+                None => {
+                    if comment_depth == 0 {
+                        result.push(curr);
+                    };
+                    break;
+                }
+            }
+        } else {
+            if comment_depth == 0 {
+                result.push(curr);
+            }
+            (curr, look) = match look {
+                None => break,
+                Some(l) => (l, chars.next()),
+            };
+        };
+
+        if comment_depth < 0 {
+            let msg = "Encountered unmatched *)".to_string();
+            return Err(CommentError { msg });
+        }
+    }
+    if comment_depth != 0 {
+        let msg = format!(
+            "At least one unmatched (*.  (Comment depth was {} upon finishing scan.)",
+            comment_depth
+        );
+        return Err(CommentError { msg });
+    }
+    Ok(result)
+}
+
 pub fn tokenize_all(input: &str) -> Vec<Token> {
-    let lexer = Token::lexer(input).spanned();
+    let stripped = &strip_long_comments(input).unwrap();
+    let lexer = Token::lexer(stripped).spanned();
     let mut result = vec![];
     for inner in lexer {
         let tok = match inner {
@@ -171,6 +260,37 @@ pub fn tokenize_all(input: &str) -> Vec<Token> {
         result.push(tok);
     }
     result
+}
+
+#[cfg(test)]
+mod token_tests {
+
+    use super::*;
+
+    #[test]
+    fn strip_comments1() {
+        let code: &str = "
+        class Apple {};
+        class Orange {};
+        ";
+        let result = strip_long_comments(code).unwrap();
+        let desired = code.to_owned();
+        assert_eq!(result, desired);
+    }
+    #[test]
+    fn strip_comments2() {
+        let code: &str = "xyz(*abc(*def*ghi(jkl*)*mno)*)p\nqr";
+        let result = strip_long_comments(code).unwrap();
+        let desired = "xyzp\nqr";
+        assert_eq!(result, desired);
+    }
+    #[test]
+    fn strip_comments3() {
+        let code: &str = "xyz(((*a)bc**))def";
+        let result = strip_long_comments(code).unwrap();
+        let desired = "xyz(()def";
+        assert_eq!(result, desired);
+    }
 }
 
 // #######  For LALRPOP Parser #########
@@ -207,9 +327,4 @@ impl Iterator for CoolLexer<'_> {
             Some((Ok(token), span)) => Some(Ok((span.start, token, span.end))),
         }
     }
-}
-
-#[cfg(test)]
-mod lex_tests {
-    //use super::*;
 }
