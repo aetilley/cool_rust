@@ -244,7 +244,7 @@ mod parse_tests {
     fn test_simple_program() {
         let code: &str = r"
         class Apple {};
-        class Orange: Bananas {};
+        class Orange inherits Bananas {};
         ";
         let result = Program::parse(code).expect("Text program failed to parse");
         let desired_result = Program {
