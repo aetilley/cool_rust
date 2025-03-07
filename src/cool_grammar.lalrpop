@@ -1,7 +1,7 @@
 // build.rs uses this language specification to generate the parser ('cool_grammar.rs').
 
-use crate::token::{Token, LexicalError};
-use crate::ast::{Program, Classes, Class, Features, Feature, Expr, Exprs, Formals, Formal, Case, Cases};
+use crate::token::{Token, LexicalError, StringLiteralError};
+use crate::ast::{add_one, Program, Classes, Class, Features, Feature, Expr, Exprs, Formals, Formal, Case, Cases, LetBinding, LetBindings};
 
 grammar;
 
@@ -16,7 +16,7 @@ extern {
     "objectid" => Token::ObjectId(<String>),
     "bool_const" => Token::BoolConst(<bool>),
     "int_const" => Token::IntConst(<String>),
-    "str_const" => Token::StrConst(<String>),
+    "str_const" => Token::StrConst(<Result<String, StringLiteralError>>),
     "{" => Token::LCurly,
     "}" => Token::RCurly,
     "(" => Token::LParen,
@@ -65,11 +65,7 @@ pub ClassTy: Class = {
 
 pub ClassesTy: Classes = {
   <c: ClassTy> => vec![c],
-  <cs: ClassesTy> <c: ClassTy> => {
-    let mut res = cs.clone();
-    res.push(c);
-    res
-  },
+  <cs: ClassesTy> <c: ClassTy> => add_one(&cs, &c),
 }
 
 pub FormalTy: Formal = {
@@ -78,11 +74,7 @@ pub FormalTy: Formal = {
 
 pub _SomeFormalsTy: Formals = {
   <f: FormalTy> => vec![f],
-  <some: _SomeFormalsTy> "," <f: FormalTy> => {
-    let mut res = some.clone();
-    res.push(f);
-    res
-  }
+  <some: _SomeFormalsTy> "," <f: FormalTy> => add_one(&some, &f), 
 }
 
 pub FormalsTy: Formals = {
@@ -98,60 +90,45 @@ pub FeatureTy: Feature = {
 
 pub FeaturesTy: Features = {
   () => vec![],
-  <fs: FeaturesTy> <f: FeatureTy>  => {
-    let mut res = fs.clone();
-    res.push(f);
-    res
-  },
+  <fs: FeaturesTy> <f: FeatureTy>  => add_one(&fs, &f), 
 }
 
 pub ExprTy: Expr = {
-  // Precedence 0
-  #[precedence(level="0")]
-  <name: "objectid"> => Expr::object(name),
-  #[precedence(level="0")]
-  <value: "int_const"> => Expr::int_const(value),
-  #[precedence(level="0")]
-  <value: "str_const"> => Expr::str_const(value),
-  #[precedence(level="0")]
-  <value: BoolConstTy> => Expr::bool_const(value),
-  #[precedence(level="0")]
-  "{" <exprs: ExprsWithSemicolonsTy> "}" => Expr::block(exprs),
-  #[precedence(level="0")]
-  "(" <expr: ExprTy> ")" => expr,
-  #[precedence(level="0")]
-  "new" <typ: "typeid"> => Expr::new(typ),
-  #[precedence(level="0")]
-  "if" <pred: ExprTy> "then" <then_expr: ExprTy> "else" <else_expr: ExprTy> "fi" => Expr::cond(pred, then_expr, else_expr),
-  #[precedence(level="0")]
-  "while" <cond: ExprTy> "loop" <body: ExprTy> "pool" => Expr::r#loop(cond, body),
-  #[precedence(level="0")]
-  <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(Expr::no_expr(), method_name, exprs),
-  #[precedence(level="0")]
-  "case" <expr: ExprTy> "of" <cases: CasesTy> "esac" => Expr::typcase(expr, cases),
-  // #[precedence(level="0")]
-  // <let_expr: LetExprTy> => let_expr,
+  // Precedence 10
 
-  // Precedence 1
-  #[precedence(level="1")] #[assoc(side="right")]
+  #[precedence(level="10")]
+  "{" <exprs: ExprsWithSemicolonsTy> "}" => Expr::block(exprs),
+
+  #[precedence(level="10")]
+  "new" <typ: "typeid"> => Expr::new(typ),
+  #[precedence(level="10")]
+  "while" <cond: ExprTy> "loop" <body: ExprTy> "pool" => Expr::r#loop(cond, body),
+  #[precedence(level="10")]
+  "case" <expr: ExprTy> "of" <cases: CasesTy> "esac" => Expr::typcase(expr, cases),
+  #[precedence(level="10")]
+  "let" <let_bindings: LetBindingsTy> "in" <body: ExprTy> => LetBinding::unwrap_let_bindings(let_bindings, body),
+
+  
+  // Precedence 9
+  #[precedence(level="9")] #[assoc(side="right")]
   <var: "objectid"> "<-" <expr: ExprTy> => Expr::assign(var, expr),
 
-  // Precedence 2
-  #[precedence(level="2")]
+  // Precedence 8
+  #[precedence(level="8")]
   "not" <e: ExprTy> => Expr::not(e),
 
-  // Precedence 3
-  #[precedence(level="3")] #[assoc(side="left")]
+  // Precedence 7
+  #[precedence(level="7")] #[assoc(side="left")]
   <e1: ExprTy> "=" <e2: ExprTy> => Expr::eq(e1, e2),
-  #[precedence(level="3")] #[assoc(side="left")]
+  #[precedence(level="7")] #[assoc(side="left")]
   <e1: ExprTy> "<=" <e2: ExprTy> => Expr::leq(e1, e2),
-  #[precedence(level="3")] #[assoc(side="left")]
+  #[precedence(level="7")] #[assoc(side="left")]
   <e1: ExprTy> "<" <e2: ExprTy> => Expr::lt(e1, e2),
 
-  // Precedence 4
-  #[precedence(level="4")] #[assoc(side="left")]
+  // Precedence 6
+  #[precedence(level="6")] #[assoc(side="left")]
   <e1: ExprTy> "+" <e2: ExprTy> => Expr::plus(e1, e2),
-  #[precedence(level="4")] #[assoc(side="left")]
+  #[precedence(level="6")] #[assoc(side="left")]
   <e1: ExprTy> "-" <e2: ExprTy> => Expr::minus(e1, e2),
 
   // Precedence 5
@@ -160,21 +137,36 @@ pub ExprTy: Expr = {
   #[precedence(level="5")] #[assoc(side="left")]
   <e1: ExprTy> "/" <e2: ExprTy> => Expr::divide(e1, e2),
 
-  // Precedence 6
-  #[precedence(level="6")]
+  // Precedence 4
+  #[precedence(level="4")]
   "isvoid" <expr: ExprTy> => Expr::isvoid(expr),
 
-  // Precedence 7
-  #[precedence(level="7")]
+  // Precedence 3
+  #[precedence(level="3")]
   "~" <expr: ExprTy> => Expr::comp(expr),
 
-  // Precedence 8
-  #[precedence(level="8")]
+  // Precedence 2
+  #[precedence(level="2")]
   <slf: ExprTy> "@" <typ: "typeid"> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::static_dispatch(slf, typ, method_name, exprs),
 
-  // Precedence 9
-  #[precedence(level="9")]
+  // Precedence 1
+  #[precedence(level="1")]
   <slf: ExprTy> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(slf, method_name, exprs),
+    #[precedence(level="1")]
+  <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(Expr::no_expr(), method_name, exprs),
+  #[precedence(level="1")]
+  "if" <pred: ExprTy> "then" <then_expr: ExprTy> "else" <else_expr: ExprTy> "fi" => Expr::cond(pred, then_expr, else_expr),
+
+  #[precedence(level="0")]
+  <name: "objectid"> => Expr::object(name),
+  #[precedence(level="0")]
+  <value: "int_const"> => Expr::int_const(value),
+  #[precedence(level="0")]
+  <maybe_value: "str_const"> => Expr::str_const(maybe_value.unwrap()),
+  #[precedence(level="0")]
+  <value: BoolConstTy> => Expr::bool_const(value),
+    #[precedence(level="0")] 
+  "(" <expr: ExprTy> ")" => expr,
 }
 
 pub BoolConstTy: bool = {
@@ -188,20 +180,13 @@ pub CommaSepExprsTy: Exprs = {
 
 pub _SomeCommaSepExprTy: Exprs = {
   <e: ExprTy> => vec![e],
-  <some: _SomeCommaSepExprTy> "," <f: ExprTy> => {
-    let mut res = some.clone();
-    res.push(f);
-    res
-  }
+  <some: _SomeCommaSepExprTy> "," <f: ExprTy> => add_one(&some, &f),
 }
 
 pub ExprsWithSemicolonsTy: Exprs = {
   <e: ExprTy> ";" => vec![e],
-  <es: ExprsWithSemicolonsTy> <e: ExprTy> ";" => {
-    let mut res = es.clone();
-    res.push(e);
-    res
-  }
+  <es: ExprsWithSemicolonsTy> <e: ExprTy> ";" => add_one(&es, &e),
+
 }
 
 pub CaseTy : Case = {
@@ -210,9 +195,15 @@ pub CaseTy : Case = {
 
 pub CasesTy: Cases = {
   <case: CaseTy> => vec![case],
-  <cs: CasesTy> <c: CaseTy> => {
-    let mut res = cs.clone();
-    res.push(c);
-    res
-  }
+  <cs: CasesTy> <c: CaseTy> => add_one(&cs, &c),
+}
+
+pub LetBindingTy: LetBinding = {
+  <id: "objectid"> ":" <typ: "typeid"> => LetBinding::let_binding(id, typ, Expr::no_expr()),
+  <id: "objectid"> ":" <typ: "typeid"> "<-" <expr: ExprTy> => LetBinding::let_binding(id, typ, expr),
+}
+
+pub LetBindingsTy : LetBindings = {
+  <binding: LetBindingTy> => vec![binding],
+  <bs: LetBindingsTy> "," <b: LetBindingTy> => add_one(&bs, &b),
 }
