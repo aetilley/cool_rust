@@ -114,9 +114,9 @@ impl Parse for Feature {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Case {
-    id: String,
-    typ: String,
-    expr: Expr,
+    pub id: String,
+    pub typ: String,
+    pub expr: Expr,
 }
 pub type Cases = Vec<Case>;
 impl Case {
@@ -252,7 +252,7 @@ pub struct Expr {
 pub type Exprs = Vec<Expr>;
 impl Expr {
     pub fn from(data: ExprData) -> Self {
-        let stype = "NoType".to_owned();
+        let stype = "No_type".to_owned();
         Expr {
             data: Box::new(data),
             stype,
