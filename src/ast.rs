@@ -45,10 +45,10 @@ pub struct Class {
 pub type Classes = Vec<Class>;
 
 impl Class {
-    pub fn class(name: String, parent: String, features: Features) -> Class {
+    pub fn class(name: &str, parent: &str, features: Features) -> Class {
         Class {
-            name,
-            parent,
+            name: name.to_owned(),
+            parent: parent.to_owned(),
             features,
         }
     }
@@ -69,8 +69,11 @@ pub struct Formal {
 }
 pub type Formals = Vec<Formal>;
 impl Formal {
-    pub fn formal(name: String, typ: String) -> Formal {
-        Formal { name, typ }
+    pub fn formal(name: &str, typ: &str) -> Formal {
+        Formal {
+            name: name.to_owned(),
+            typ: typ.to_owned(),
+        }
     }
 }
 
@@ -91,14 +94,18 @@ pub enum Feature {
 pub type Features = Vec<Feature>;
 
 impl Feature {
-    pub fn attr(name: String, typ: String, init: Expr) -> Feature {
-        Feature::Attr { name, typ, init }
+    pub fn attr(name: &str, typ: &str, init: Expr) -> Feature {
+        Feature::Attr {
+            name: name.to_owned(),
+            typ: typ.to_owned(),
+            init,
+        }
     }
-    pub fn method(name: String, formals: Formals, typ: String, body: Expr) -> Feature {
+    pub fn method(name: &str, formals: Formals, typ: &str, body: Expr) -> Feature {
         Feature::Method {
-            name,
+            name: name.to_owned(),
             formals,
-            typ,
+            typ: typ.to_owned(),
             body,
         }
     }
@@ -120,8 +127,12 @@ pub struct Case {
 }
 pub type Cases = Vec<Case>;
 impl Case {
-    pub fn case(id: String, typ: String, expr: Expr) -> Self {
-        Case { id, typ, expr }
+    pub fn case(id: &str, typ: &str, expr: Expr) -> Self {
+        Case {
+            id: id.to_owned(),
+            typ: typ.to_owned(),
+            expr,
+        }
     }
 }
 
@@ -135,8 +146,12 @@ pub struct LetBinding {
 }
 pub type LetBindings = Vec<LetBinding>;
 impl LetBinding {
-    pub fn let_binding(id: String, typ: String, init: Expr) -> LetBinding {
-        LetBinding { id, typ, init }
+    pub fn let_binding(id: &str, typ: &str, init: Expr) -> LetBinding {
+        LetBinding {
+            id: id.to_owned(),
+            typ: typ.to_owned(),
+            init,
+        }
     }
 
     pub fn unwrap_let_bindings(let_bindings: LetBindings, body: Expr) -> Expr {
@@ -146,7 +161,7 @@ impl LetBinding {
         let head = let_bindings[0].to_owned();
         let tail = let_bindings[1..].to_owned();
         let new_body = LetBinding::unwrap_let_bindings(tail, body);
-        Expr::r#let(head.id, head.typ, head.init, new_body)
+        Expr::r#let(&head.id, &head.typ, head.init, new_body)
     }
 }
 
@@ -269,126 +284,108 @@ impl Parse for Expr {
 }
 
 impl Expr {
-    pub fn r#let(id: String, typ: String, init: Expr, body: Expr) -> Expr {
-        Expr::from(ExprData::Let {
-            id,
-            typ,
-            init,
-            body,
-        })
+    pub fn r#let(id: &str, typ: &str, init: Expr, body: Expr) -> Expr {
+        Expr::from(ExprData::r#let(id, typ, init, body))
     }
 
     pub fn no_expr() -> Expr {
-        Expr::from(ExprData::NoExpr {})
+        Expr::from(ExprData::no_expr())
     }
 
-    pub fn object(id: String) -> Expr {
-        Expr::from(ExprData::Object { id })
+    pub fn object(id: &str) -> Expr {
+        Expr::from(ExprData::object(id))
     }
 
     pub fn bool_const(val: bool) -> Expr {
-        Expr::from(ExprData::BoolConst { val })
+        Expr::from(ExprData::bool_const(val))
     }
 
-    pub fn int_const(val: String) -> Expr {
-        Expr::from(ExprData::IntConst { val })
+    pub fn int_const(val: &str) -> Expr {
+        Expr::from(ExprData::int_const(val))
     }
 
-    pub fn str_const(val: String) -> Expr {
-        Expr::from(ExprData::StrConst { val })
+    pub fn str_const(val: &str) -> Expr {
+        Expr::from(ExprData::str_const(val))
     }
 
-    pub fn dispatch(slf: Expr, method_name: String, args: Exprs) -> Expr {
-        Expr::from(ExprData::Dispatch {
-            slf,
-            method_name,
-            args,
-        })
+    pub fn dispatch(slf: Expr, method_name: &str, args: Exprs) -> Expr {
+        Expr::from(ExprData::dispatch(slf, method_name, args))
     }
 
-    pub fn static_dispatch(elem: Expr, typ: String, method_name: String, args: Exprs) -> Expr {
-        Expr::from(ExprData::StaticDispatch {
-            slf: elem,
-            typ,
-            method_name,
-            args,
-        })
+    pub fn static_dispatch(slf: Expr, typ: &str, method_name: &str, args: Exprs) -> Expr {
+        Expr::from(ExprData::static_dispatch(slf, typ, method_name, args))
     }
 
-    pub fn new(typ: String) -> Expr {
-        Expr::from(ExprData::New { typ })
+    pub fn new(typ: &str) -> Expr {
+        Expr::from(ExprData::new(typ))
     }
 
     pub fn typcase(expr: Expr, cases: Cases) -> Expr {
-        Expr::from(ExprData::TypCase { expr, cases })
+        Expr::from(ExprData::typcase(expr, cases))
     }
     pub fn r#loop(pred: Expr, body: Expr) -> Expr {
-        Expr::from(ExprData::Loop { pred, body })
+        Expr::from(ExprData::r#loop(pred, body))
     }
 
     pub fn cond(pred: Expr, then_expr: Expr, else_expr: Expr) -> Expr {
-        Expr::from(ExprData::Cond {
-            pred,
-            then_expr,
-            else_expr,
-        })
+        Expr::from(ExprData::cond(pred, then_expr, else_expr))
     }
 
     pub fn block(exprs: Exprs) -> Expr {
-        Expr::from(ExprData::Block { exprs })
+        Expr::from(ExprData::block(exprs))
     }
 
-    pub fn assign(id: String, expr: Expr) -> Expr {
-        Expr::from(ExprData::Assign { id, expr })
+    pub fn assign(id: &str, expr: Expr) -> Expr {
+        Expr::from(ExprData::assign(id, expr))
     }
 
     #[allow(clippy::should_implement_trait)]
     pub fn not(expr: Expr) -> Expr {
-        Expr::from(ExprData::Not { expr })
+        Expr::from(ExprData::not(expr))
     }
 
     pub fn isvoid(expr: Expr) -> Expr {
-        Expr::from(ExprData::IsVoid { expr })
+        Expr::from(ExprData::isvoid(expr))
     }
 
     pub fn comp(expr: Expr) -> Expr {
-        Expr::from(ExprData::Comp { expr })
+        Expr::from(ExprData::comp(expr))
     }
 
     pub fn lt(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::from(ExprData::Lt { lhs, rhs })
+        Expr::from(ExprData::lt(lhs, rhs))
     }
 
     pub fn leq(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::from(ExprData::Leq { lhs, rhs })
+        Expr::from(ExprData::leq(lhs, rhs))
     }
 
     pub fn eq(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::from(ExprData::Eq { lhs, rhs })
+        Expr::from(ExprData::eq(lhs, rhs))
     }
 
     pub fn plus(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::from(ExprData::Plus { lhs, rhs })
+        Expr::from(ExprData::plus(lhs, rhs))
     }
 
     pub fn minus(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::from(ExprData::Minus { lhs, rhs })
+        Expr::from(ExprData::minus(lhs, rhs))
     }
 
     pub fn times(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::from(ExprData::Times { lhs, rhs })
+        Expr::from(ExprData::times(lhs, rhs))
     }
 
     pub fn divide(lhs: Expr, rhs: Expr) -> Expr {
-        Expr::from(ExprData::Divide { lhs, rhs })
+        Expr::from(ExprData::divide(lhs, rhs))
     }
 }
 
 impl ExprData {
-    pub fn r#let(id: String, typ: String, init: Expr, body: Expr) -> ExprData {
+    pub fn r#let(id: &str, typ: &str, init: Expr, body: Expr) -> ExprData {
         ExprData::Let {
-            id,
-            typ,
+            id: id.to_owned(),
+            typ: typ.to_owned(),
             init,
             body,
         }
@@ -398,41 +395,47 @@ impl ExprData {
         ExprData::NoExpr {}
     }
 
-    pub fn object(id: String) -> ExprData {
-        ExprData::Object { id }
+    pub fn object(id: &str) -> ExprData {
+        ExprData::Object { id: id.to_owned() }
     }
 
     pub fn bool_const(val: bool) -> ExprData {
         ExprData::BoolConst { val }
     }
 
-    pub fn int_const(val: String) -> ExprData {
-        ExprData::IntConst { val }
+    pub fn int_const(val: &str) -> ExprData {
+        ExprData::IntConst {
+            val: val.to_owned(),
+        }
     }
 
-    pub fn str_const(val: String) -> ExprData {
-        ExprData::StrConst { val }
+    pub fn str_const(val: &str) -> ExprData {
+        ExprData::StrConst {
+            val: val.to_owned(),
+        }
     }
 
-    pub fn dispatch(slf: Expr, method_name: String, args: Exprs) -> ExprData {
+    pub fn dispatch(slf: Expr, method_name: &str, args: Exprs) -> ExprData {
         ExprData::Dispatch {
             slf,
-            method_name,
+            method_name: method_name.to_owned(),
             args,
         }
     }
 
-    pub fn static_dispatch(elem: Expr, typ: String, method_name: String, args: Exprs) -> ExprData {
+    pub fn static_dispatch(elem: Expr, typ: &str, method_name: &str, args: Exprs) -> ExprData {
         ExprData::StaticDispatch {
             slf: elem,
-            typ,
-            method_name,
+            typ: typ.to_owned(),
+            method_name: method_name.to_owned(),
             args,
         }
     }
 
-    pub fn new(typ: String) -> ExprData {
-        ExprData::New { typ }
+    pub fn new(typ: &str) -> ExprData {
+        ExprData::New {
+            typ: typ.to_owned(),
+        }
     }
 
     pub fn typcase(expr: Expr, cases: Cases) -> ExprData {
@@ -454,8 +457,11 @@ impl ExprData {
         ExprData::Block { exprs }
     }
 
-    pub fn assign(id: String, expr: Expr) -> ExprData {
-        ExprData::Assign { id, expr }
+    pub fn assign(id: &str, expr: Expr) -> ExprData {
+        ExprData::Assign {
+            id: id.to_owned(),
+            expr,
+        }
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -611,7 +617,7 @@ mod parse_tests {
         karen
         ";
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::object("karen".to_string());
+        let desired_result = Expr::object("karen");
         assert_eq!(result, desired_result);
     }
 
@@ -641,8 +647,8 @@ mod parse_tests {
         ";
         let result1 = Expr::parse(code1).expect("Test code failed to parse");
         let result2 = Expr::parse(code2).expect("Test code failed to parse");
-        let desired_result1 = Expr::int_const("42".to_owned());
-        let desired_result2 = Expr::int_const("0".to_owned());
+        let desired_result1 = Expr::int_const("42");
+        let desired_result2 = Expr::int_const("0");
         assert_eq!(result1, desired_result1);
         assert_eq!(result2, desired_result2);
     }
@@ -653,7 +659,7 @@ mod parse_tests {
         "abc"
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::str_const("abc".to_owned());
+        let desired_result = Expr::str_const("abc");
         assert_eq!(result, desired_result);
     }
 
@@ -664,12 +670,9 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::dispatch(
-            Expr::object("a".to_owned()),
-            "foo".to_owned(),
-            vec![
-                Expr::str_const("hello".to_owned()),
-                Expr::int_const("42".to_owned()),
-            ],
+            Expr::object("a"),
+            "foo",
+            vec![Expr::str_const("hello"), Expr::int_const("42")],
         );
         assert_eq!(result, desired_result);
     }
@@ -682,13 +685,10 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::static_dispatch(
-            Expr::object("a".to_owned()),
-            "Apples".to_owned(),
-            "foo".to_owned(),
-            vec![
-                Expr::str_const("hello".to_owned()),
-                Expr::int_const("42".to_owned()),
-            ],
+            Expr::object("a"),
+            "Apples",
+            "foo",
+            vec![Expr::str_const("hello"), Expr::int_const("42")],
         );
         assert_eq!(result, desired_result);
     }
@@ -699,7 +699,7 @@ mod parse_tests {
             new T
         ";
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::new("T".to_string());
+        let desired_result = Expr::new("T");
         assert_eq!(result, desired_result);
     }
 
@@ -715,14 +715,14 @@ mod parse_tests {
         let dcase1 = Case {
             id: "a".to_owned(),
             typ: "T1".to_owned(),
-            expr: Expr::object("expr1".to_owned()),
+            expr: Expr::object("expr1"),
         };
         let dcase2 = Case {
             id: "b".to_owned(),
             typ: "T2".to_owned(),
-            expr: Expr::object("expr2".to_owned()),
+            expr: Expr::object("expr2"),
         };
-        let desired_result = Expr::typcase(Expr::object("bob".to_string()), vec![dcase1, dcase2]);
+        let desired_result = Expr::typcase(Expr::object("bob"), vec![dcase1, dcase2]);
         assert_eq!(result, desired_result);
     }
 
@@ -733,14 +733,14 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::r#let(
-            "bob".to_owned(),
-            "Int".to_owned(),
+            "bob",
+            "Int",
             Expr::no_expr(),
             Expr::r#let(
-                "carol".to_owned(),
-                "String".to_owned(),
-                Expr::str_const("hello".to_owned()),
-                Expr::object("somebody".to_owned()),
+                "carol",
+                "String",
+                Expr::str_const("hello"),
+                Expr::object("somebody"),
             ),
         );
         assert_eq!(result, desired_result);
@@ -751,10 +751,7 @@ mod parse_tests {
             while somepred loop somebody pool 
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::r#loop(
-            Expr::object("somepred".to_owned()),
-            Expr::object("somebody".to_owned()),
-        );
+        let desired_result = Expr::r#loop(Expr::object("somepred"), Expr::object("somebody"));
         assert_eq!(result, desired_result);
     }
     #[test]
@@ -764,9 +761,9 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::block(vec![
-            Expr::object("e1".to_owned()),
-            Expr::object("e2".to_owned()),
-            Expr::object("e3".to_owned()),
+            Expr::object("e1"),
+            Expr::object("e2"),
+            Expr::object("e3"),
         ]);
         assert_eq!(result, desired_result);
     }
@@ -777,9 +774,9 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::cond(
-            Expr::object("somepred".to_owned()),
-            Expr::object("somethen".to_owned()),
-            Expr::object("someelse".to_owned()),
+            Expr::object("somepred"),
+            Expr::object("somethen"),
+            Expr::object("someelse"),
         );
         assert_eq!(result, desired_result);
     }
@@ -789,7 +786,7 @@ mod parse_tests {
            a  <- b
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::assign("a".to_owned(), Expr::object("b".to_owned()));
+        let desired_result = Expr::assign("a", Expr::object("b"));
         assert_eq!(result, desired_result);
     }
 
@@ -799,7 +796,7 @@ mod parse_tests {
            not x
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::not(Expr::object("x".to_owned()));
+        let desired_result = Expr::not(Expr::object("x"));
         assert_eq!(result, desired_result);
     }
 
@@ -809,14 +806,14 @@ mod parse_tests {
            isvoid x
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::isvoid(Expr::object("x".to_owned()));
+        let desired_result = Expr::isvoid(Expr::object("x"));
         assert_eq!(result, desired_result);
     }
     #[test]
     fn test_comp() {
         let code: &str = r#"~x"#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::comp(Expr::object("x".to_owned()));
+        let desired_result = Expr::comp(Expr::object("x"));
         assert_eq!(result, desired_result);
     }
 
@@ -834,12 +831,9 @@ mod parse_tests {
         let result_eq = Expr::parse(code_eq).expect("Test code failed to parse");
         let result_leq = Expr::parse(code_leq).expect("Test code failed to parse");
         let result_lt = Expr::parse(code_lt).expect("Test code failed to parse");
-        let desired_result_eq =
-            Expr::eq(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
-        let desired_result_leq =
-            Expr::leq(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
-        let desired_result_lt =
-            Expr::lt(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
+        let desired_result_eq = Expr::eq(Expr::object("x"), Expr::object("y"));
+        let desired_result_leq = Expr::leq(Expr::object("x"), Expr::object("y"));
+        let desired_result_lt = Expr::lt(Expr::object("x"), Expr::object("y"));
         assert_eq!(result_eq, desired_result_eq);
         assert_eq!(result_leq, desired_result_leq);
         assert_eq!(result_lt, desired_result_lt);
@@ -860,7 +854,7 @@ mod parse_tests {
             (x + y)
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::plus(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
+        let desired_result = Expr::plus(Expr::object("x"), Expr::object("y"));
         assert_eq!(result, desired_result);
     }
 
@@ -871,8 +865,8 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::minus(
-            Expr::dispatch(Expr::no_expr(), "g".to_owned(), vec![]),
-            Expr::object("y".to_owned()),
+            Expr::dispatch(Expr::no_expr(), "g", vec![]),
+            Expr::object("y"),
         );
         assert_eq!(result, desired_result);
     }
@@ -884,9 +878,9 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::cond(
-            Expr::plus(Expr::object("x".to_owned()), Expr::object("y".to_owned())),
-            Expr::object("a".to_owned()),
-            Expr::object("b".to_owned()),
+            Expr::plus(Expr::object("x"), Expr::object("y")),
+            Expr::object("a"),
+            Expr::object("b"),
         );
         assert_eq!(result, desired_result);
     }
@@ -909,14 +903,10 @@ mod parse_tests {
         let result_minus = Expr::parse(code_minus).expect("Test code failed to parse");
         let result_times = Expr::parse(code_times).expect("Test code failed to parse");
         let result_divide = Expr::parse(code_divide).expect("Test code failed to parse");
-        let desired_result_plus =
-            Expr::plus(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
-        let desired_result_minus =
-            Expr::minus(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
-        let desired_result_times =
-            Expr::times(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
-        let desired_result_divide =
-            Expr::divide(Expr::object("x".to_owned()), Expr::object("y".to_owned()));
+        let desired_result_plus = Expr::plus(Expr::object("x"), Expr::object("y"));
+        let desired_result_minus = Expr::minus(Expr::object("x"), Expr::object("y"));
+        let desired_result_times = Expr::times(Expr::object("x"), Expr::object("y"));
+        let desired_result_divide = Expr::divide(Expr::object("x"), Expr::object("y"));
         assert_eq!(result_plus, desired_result_plus);
         assert_eq!(result_minus, desired_result_minus);
         assert_eq!(result_times, desired_result_times);

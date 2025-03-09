@@ -59,8 +59,8 @@ pub ProgramTy: Program = {
 }
 
 pub ClassTy: Class = {
-  "class" <name: "typeid"> "{" <features: FeaturesTy> "}" ";"=> Class::class(name, "Object".to_string(), features),
-  "class" <name: "typeid"> "inherits" <parent: "typeid"> "{" <features: FeaturesTy> "}" ";"=> Class::class(name, parent, features),
+  "class" <name: "typeid"> "{" <features: FeaturesTy> "}" ";"=> Class::class(&name, "Object", features),
+  "class" <name: "typeid"> "inherits" <parent: "typeid"> "{" <features: FeaturesTy> "}" ";"=> Class::class(&name, &parent, features),
 }
 
 pub ClassesTy: Classes = {
@@ -69,7 +69,7 @@ pub ClassesTy: Classes = {
 }
 
 pub FormalTy: Formal = {
-  <name: "objectid"> ":" <typ: "typeid">  => Formal::formal(name, typ),
+  <name: "objectid"> ":" <typ: "typeid">  => Formal::formal(&name, &typ),
 }
 
 pub _SomeFormalsTy: Formals = {
@@ -83,9 +83,9 @@ pub FormalsTy: Formals = {
 }
 
 pub FeatureTy: Feature = {
-  <name: "objectid"> ":" <typ: "typeid"> ";" => Feature::attr(name, typ, Expr::no_expr()),
-  <name: "objectid"> ":" <typ: "typeid"> "<-" <expr: ExprTy> ";" => Feature::attr(name, typ, expr),
-  <name: "objectid"> "(" <formals: FormalsTy> ")" ":" <typ: "typeid"> "{" <expr: ExprTy> "}" ";" => Feature::method(name, formals, typ, expr), 
+  <name: "objectid"> ":" <typ: "typeid"> ";" => Feature::attr(&name, &typ, Expr::no_expr()),
+  <name: "objectid"> ":" <typ: "typeid"> "<-" <expr: ExprTy> ";" => Feature::attr(&name, &typ, expr),
+  <name: "objectid"> "(" <formals: FormalsTy> ")" ":" <typ: "typeid"> "{" <expr: ExprTy> "}" ";" => Feature::method(&name, formals, &typ, expr), 
 }
 
 pub FeaturesTy: Features = {
@@ -100,7 +100,7 @@ pub ExprTy: Expr = {
   "{" <exprs: ExprsWithSemicolonsTy> "}" => Expr::block(exprs),
 
   #[precedence(level="10")]
-  "new" <typ: "typeid"> => Expr::new(typ),
+  "new" <typ: "typeid"> => Expr::new(&typ),
   #[precedence(level="10")]
   "while" <cond: ExprTy> "loop" <body: ExprTy> "pool" => Expr::r#loop(cond, body),
   #[precedence(level="10")]
@@ -111,7 +111,7 @@ pub ExprTy: Expr = {
   
   // Precedence 9
   #[precedence(level="9")] #[assoc(side="right")]
-  <var: "objectid"> "<-" <expr: ExprTy> => Expr::assign(var, expr),
+  <var: "objectid"> "<-" <expr: ExprTy> => Expr::assign(&var, expr),
 
   // Precedence 8
   #[precedence(level="8")]
@@ -147,22 +147,22 @@ pub ExprTy: Expr = {
 
   // Precedence 2
   #[precedence(level="2")]
-  <slf: ExprTy> "@" <typ: "typeid"> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::static_dispatch(slf, typ, method_name, exprs),
+  <slf: ExprTy> "@" <typ: "typeid"> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::static_dispatch(slf, &typ, &method_name, exprs),
 
   // Precedence 1
   #[precedence(level="1")]
-  <slf: ExprTy> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(slf, method_name, exprs),
+  <slf: ExprTy> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(slf, &method_name, exprs),
     #[precedence(level="1")]
-  <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(Expr::no_expr(), method_name, exprs),
+  <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(Expr::no_expr(), &method_name, exprs),
   #[precedence(level="1")]
   "if" <pred: ExprTy> "then" <then_expr: ExprTy> "else" <else_expr: ExprTy> "fi" => Expr::cond(pred, then_expr, else_expr),
 
   #[precedence(level="0")]
-  <name: "objectid"> => Expr::object(name),
+  <name: "objectid"> => Expr::object(&name),
   #[precedence(level="0")]
-  <value: "int_const"> => Expr::int_const(value),
+  <value: "int_const"> => Expr::int_const(&value),
   #[precedence(level="0")]
-  <maybe_value: "str_const"> => Expr::str_const(maybe_value.unwrap()),
+  <maybe_value: "str_const"> => Expr::str_const(&maybe_value.unwrap()),
   #[precedence(level="0")]
   <value: BoolConstTy> => Expr::bool_const(value),
     #[precedence(level="0")] 
@@ -190,7 +190,7 @@ pub ExprsWithSemicolonsTy: Exprs = {
 }
 
 pub CaseTy : Case = {
-  <name: "objectid"> ":" <typ: "typeid"> "=>" <expr: ExprTy> ";" => Case::case(name, typ, expr),
+  <name: "objectid"> ":" <typ: "typeid"> "=>" <expr: ExprTy> ";" => Case::case(&name, &typ, expr),
 }
 
 pub CasesTy: Cases = {
@@ -199,8 +199,8 @@ pub CasesTy: Cases = {
 }
 
 pub LetBindingTy: LetBinding = {
-  <id: "objectid"> ":" <typ: "typeid"> => LetBinding::let_binding(id, typ, Expr::no_expr()),
-  <id: "objectid"> ":" <typ: "typeid"> "<-" <expr: ExprTy> => LetBinding::let_binding(id, typ, expr),
+  <id: "objectid"> ":" <typ: "typeid"> => LetBinding::let_binding(&id, &typ, Expr::no_expr()),
+  <id: "objectid"> ":" <typ: "typeid"> "<-" <expr: ExprTy> => LetBinding::let_binding(&id, &typ, expr),
 }
 
 pub LetBindingsTy : LetBindings = {

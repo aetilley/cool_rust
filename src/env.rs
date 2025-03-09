@@ -2,7 +2,6 @@ use std::collections::hash_map::HashMap;
 
 type Scope = HashMap<String, String>;
 
-
 #[derive(Debug, PartialEq)]
 pub struct Env {
     // Since `Vec::push` pushes to the back of the vector, we will
@@ -43,7 +42,7 @@ impl Env {
     pub fn add_binding(&mut self, key: &str, value: &str) {
         // NOTE:  Currently does not throw if the key already exists
         // in the current scope. Sometimes we may want to throw an error
-        // E.g. if a symbol appears twice in a function param list. 
+        // E.g. if a symbol appears twice in a function param list.
         let top = self.stack.last_mut();
         match top {
             Some(frame) => {
@@ -58,14 +57,12 @@ impl Env {
 }
 
 #[cfg(test)]
-
 mod env_tests {
 
     use super::*;
 
     #[test]
     pub fn scope_test() {
-
         let key1 = "key1".to_owned();
         let key2 = "key2".to_owned();
         let key3 = "key3".to_owned();
@@ -97,10 +94,5 @@ mod env_tests {
 
         assert_eq!(env.lookup(&key2), Some(val2_1));
         assert_eq!(env.lookup(&key3), None);
-
     }
-
-
-
-
 }
