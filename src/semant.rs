@@ -14,7 +14,7 @@ use crate::env::Env;
 
 #[derive(Debug, PartialEq)]
 pub struct SemanticAnalysisError {
-    msg: String,
+    pub msg: String,
 }
 
 impl Program {
@@ -24,7 +24,7 @@ impl Program {
 
         // Analyze the class inheritance graph of a Program to verify that
         // there are no cycles.
-        let ct = ClassTable::new(self.classes.clone())?;
+        let ct = ClassTable::new(&self.classes)?;
 
         let mut env = Env::new();
 
@@ -139,16 +139,16 @@ impl Analyze for Expr {
             } => {
                 slf.analyze(ct, env, cls)?;
 
-                let param_types = ct.get_param_types(&slf.stype, method_name);
+                let param_types = ct.get_param_types(&slf.stype, method_name)?;
                 let mut next_param = 0;
 
                 for arg in args.iter_mut() {
                     arg.analyze(ct, env, cls)?;
-                    ct.assert_subtype(&arg.stype, &param_types[next_param])?;
+                    ct.assert_subtype(&arg.stype, &param_types[next_param].typ)?;
                     next_param += 1;
                 }
 
-                let mut return_type = ct.get_return_type(&slf.stype, method_name);
+                let mut return_type = ct.get_return_type(&slf.stype, method_name)?;
 
                 if return_type == "SELF_TYPE" {
                     return_type = slf.stype.clone();
@@ -164,16 +164,16 @@ impl Analyze for Expr {
                 slf.analyze(ct, env, cls)?;
                 ct.assert_subtype(&slf.stype, typ)?;
 
-                let param_types = ct.get_param_types(typ, method_name);
+                let param_types = ct.get_param_types(typ, method_name)?;
                 let mut next_param = 0;
 
                 for arg in args.iter_mut() {
                     arg.analyze(ct, env, cls)?;
-                    ct.assert_subtype(&arg.stype, &param_types[next_param])?;
+                    ct.assert_subtype(&arg.stype, &param_types[next_param].typ)?;
                     next_param += 1;
                 }
 
-                let mut return_type = ct.get_return_type(typ, method_name);
+                let mut return_type = ct.get_return_type(typ, method_name)?;
 
                 if return_type == "SELF_TYPE" {
                     return_type = slf.stype.clone();
@@ -376,7 +376,7 @@ mod semant_tests {
         let mut f4 = Feature::parse(c4).unwrap();
 
         let mut env = Env::new();
-        let ct = ClassTable::new(vec![]).unwrap();
+        let ct = ClassTable::new(&vec![]).unwrap();
         let mut result;
         result = f1.analyze(&ct, &mut env, "UNUSED");
         assert_eq!(result, Ok(()));
@@ -401,7 +401,7 @@ mod semant_tests {
         let mut e1 = Expr::parse(c1).unwrap();
 
         let mut env = Env::new();
-        let ct = ClassTable::new(vec![]).unwrap();
+        let ct = ClassTable::new(&vec![]).unwrap();
 
         let result;
         result = e1.analyze(&ct, &mut env, "UNUSED");
@@ -417,7 +417,7 @@ mod semant_tests {
         let mut e1 = Expr::parse(c1).unwrap();
 
         let mut env = Env::new();
-        let ct = ClassTable::new(vec![]).unwrap();
+        let ct = ClassTable::new(&vec![]).unwrap();
 
         let result;
         result = e1.analyze(&ct, &mut env, "UNUSED");
@@ -432,7 +432,7 @@ mod semant_tests {
         let mut e1 = Expr::parse(c1).unwrap();
 
         let mut env = Env::new();
-        let ct = ClassTable::new(vec![]).unwrap();
+        let ct = ClassTable::new(&vec![]).unwrap();
 
         let result;
         result = e1.analyze(&ct, &mut env, "UNUSED");
