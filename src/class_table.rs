@@ -299,6 +299,7 @@ impl ClassTable {
 mod class_table_tests {
 
     use super::*;
+    use crate::ast::{Parse, Program};
     use common_macros::hash_map;
 
     #[test]
@@ -324,9 +325,21 @@ mod class_table_tests {
 
     #[test]
     fn test_constructor() {
-        let result = ClassTable::new(&vec![]).unwrap();
+        let code: &str = r"
+        class Apple {};
+        class Orange inherits Apple {
+            foo() : T2 {42};
+            bar(c: S1, d: S2) : S3 {true};
+        };
+        ";
+        let program = Program::parse(code).expect("Test code failed to parse");
 
-        let desired_classes = HashSet::<String>::new();
+        let result = ClassTable::new(&program.classes).unwrap();
+
+        let desired_classes = hash_set! {
+            "Apple".to_owned(),
+            "Orange".to_owned(),
+        };
 
         let desired_native_classes = hash_set! {
             "Int".to_owned(),
@@ -340,7 +353,9 @@ mod class_table_tests {
             "Int".to_owned()=>"Object".to_owned(),
             "IO".to_owned()=>"Object".to_owned(),
             "Bool".to_owned()=>"Object".to_owned(),
-            "Str".to_owned()=>"Object".to_owned()
+            "Str".to_owned()=>"Object".to_owned(),
+            "Apple".to_owned()=>"Object".to_owned(),
+            "Orange".to_owned()=>"Apple".to_owned(),
         };
 
         let desired_class_children = hash_map! {
@@ -349,7 +364,11 @@ mod class_table_tests {
                 "Str".to_owned(),
                 "Bool".to_owned(),
                 "Int".to_owned(),
-            }
+                "Apple".to_owned(),
+            },
+            "Apple".to_owned() => hash_set!{
+                "Orange".to_owned(),
+            },
         };
         let desired_class_method_param_types = hash_map! {
             "Object".to_owned() => hash_map!{
@@ -370,6 +389,12 @@ mod class_table_tests {
             },
             "Bool".to_owned() => hash_map!{},
             "Int".to_owned() => hash_map!{},
+
+            "Apple".to_owned() => hash_map!{},
+            "Orange".to_owned() => hash_map!{
+                "foo".to_owned() => vec![],
+                "bar".to_owned() => vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")],
+            },
         };
 
         let desired_class_method_return_types = hash_map! {
@@ -391,6 +416,12 @@ mod class_table_tests {
             },
             "Bool".to_owned() => hash_map!{},
             "Int".to_owned() => hash_map!{},
+
+            "Apple".to_owned() => hash_map!{},
+            "Orange".to_owned() => hash_map!{
+                "foo".to_owned() => "T2".to_owned(),
+                "bar".to_owned() => "S3".to_owned(),
+            },
         };
 
         assert_eq!(result.classes, desired_classes);
