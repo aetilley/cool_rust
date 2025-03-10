@@ -343,6 +343,7 @@ mod semant_tests {
         let code: &str = r"
         class Apple {};
         class Orange inherits Bananas {};
+        class Bananas {};
         ";
 
         let mut program = Program::parse(code).expect("Test code failed to parse");

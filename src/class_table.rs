@@ -90,7 +90,7 @@ impl ClassTable {
         native_classes
     }
 
-    fn _check_descendants_for_cycles(
+    fn _mark_descendants(
         node: &str,
         visited: &mut HashSet<String>,
         class_children: &ClassChildrenTy,
@@ -107,7 +107,7 @@ impl ClassTable {
                         return Err(SemanticAnalysisError { msg });
                     }
                     visited.insert(child.to_owned());
-                    ClassTable::_check_descendants_for_cycles(child, visited, class_children)?;
+                    ClassTable::_mark_descendants(child, visited, class_children)?;
                 }
                 Ok(())
             }
@@ -118,7 +118,23 @@ impl ClassTable {
         let root = "Object";
         let mut visited = HashSet::<String>::new();
         visited.insert(root.to_owned());
-        ClassTable::_check_descendants_for_cycles(root, &mut visited, class_children)
+        ClassTable::_mark_descendants(root, &mut visited, class_children)
+            .expect("We really should not be getting loops involving Object");
+        let mut detached_classes = hash_set! {};
+        for key in class_children.keys() {
+            if !visited.contains::<String>(key) {
+                detached_classes.insert(key.clone());
+            }
+        }
+        if !detached_classes.is_empty() {
+            let msg = format!(
+                "The following classes are not decendants of Object.
+               (this is likely due to their being involved in an inheritance cycle).: {:?} ",
+                detached_classes
+            );
+            return Err(SemanticAnalysisError { msg });
+        }
+        Ok(())
     }
 
     fn register_methods_and_relatives(
@@ -136,6 +152,9 @@ impl ClassTable {
                     children.insert(class.name.clone());
                 })
                 .or_insert(hash_set! {class.name.clone()});
+            class_children
+                .entry(class.name.clone())
+                .or_insert(hash_set! {});
         }
 
         let mut method_param_types = HashMap::<String, Formals>::new();
@@ -332,7 +351,7 @@ mod class_table_tests {
             bar(c: S1, d: S2) : S3 {true};
         };
         ";
-        let program = Program::parse(code).expect("Test code failed to parse");
+        let program = Program::parse(code).unwrap();
 
         let result = ClassTable::new(&program.classes).unwrap();
 
@@ -436,5 +455,44 @@ mod class_table_tests {
             result.class_method_return_type,
             desired_class_method_return_types
         );
+    }
+
+    #[test]
+    fn test_detect_cycles() {
+        let code: &str = r"
+        class Apple inherits Kiwi {};
+        class Orange inherits Apple {};
+        class Lemon inherits Orange {};
+        class Grape inherits Lemon {};
+        class Kiwi inherits Orange {};
+        ";
+        let program = Program::parse(code).unwrap();
+        let result = ClassTable::new(&program.classes);
+        assert!(result.is_err());
+    }
+
+    //#[test]
+    fn test_detect_get_return_type() {
+        assert!(false);
+    }
+
+    //#[test]
+    fn test_detect_get_param_types() {
+        assert!(false);
+    }
+
+    #[test]
+    fn test_get_lub() {
+        let code: &str = r"
+        class Apple {};
+        class Orange inherits Apple {};
+        class Lemon inherits Orange {};
+        class Grape inherits Lemon {};
+        class Kiwi inherits Orange {};
+        ";
+        let program = Program::parse(code).unwrap();
+        let ct = ClassTable::new(&program.classes).unwrap();
+        let result = ct.get_lub("Kiwi", "Grape");
+        assert_eq!(result, "Orange");
     }
 }
