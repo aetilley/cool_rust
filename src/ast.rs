@@ -791,12 +791,110 @@ mod parse_tests {
     }
 
     #[test]
-    fn test_not() {
+    fn test_assign2() {
+        let code: &str = r"
+            a <- b <- c
+        ";
+        let result = Expr::parse(code).expect("Test code failed to parse");
+        let desired_result = Expr::assign("a", Expr::assign("b", Expr::object("c")));
+        assert_eq!(result, desired_result);
+    }
+
+    #[test]
+    fn test_not_eq() {
+        let code: &str = r"
+            not a = b
+        ";
+        let result = Expr::parse(code).expect("Test code failed to parse");
+        let desired_result = Expr::not(Expr::eq(Expr::object("a"), Expr::object("b")));
+        assert_eq!(result, desired_result);
+    }
+
+    #[test]
+    fn test_compare_and_arith() {
+        let code1: &str = r"
+            a < b + c
+        ";
+        let code2: &str = r"
+            a + b < c
+        ";
+        let result1 = Expr::parse(code1).expect("Test code failed to parse");
+        let result2 = Expr::parse(code2).expect("Test code failed to parse");
+        let desired_result1 = Expr::lt(
+            Expr::object("a"),
+            Expr::plus(Expr::object("b"), Expr::object("c")),
+        );
+        let desired_result2 = Expr::lt(
+            Expr::plus(Expr::object("a"), Expr::object("b")),
+            Expr::object("c"),
+        );
+        assert_eq!(result1, desired_result1);
+        assert_eq!(result2, desired_result2);
+    }
+
+    #[test]
+    fn test_nested_arith() {
+        let code: &str = r"
+            a - b - c
+        ";
+        let result = Expr::parse(code).expect("Test code failed to parse");
+        let desired_result = Expr::minus(
+            Expr::minus(Expr::object("a"), Expr::object("b")),
+            Expr::object("c"),
+        );
+        assert_eq!(result, desired_result);
+    }
+
+    #[test]
+    fn test_nested_arith_parents() {
+        let code: &str = r"
+            a - (b - c)
+        ";
+        let result = Expr::parse(code).expect("Test code failed to parse");
+        let desired_result = Expr::minus(
+            Expr::object("a"),
+            Expr::minus(Expr::object("b"), Expr::object("c")),
+        );
+        assert_eq!(result, desired_result);
+    }
+
+    #[test]
+    fn test_compare_plus_times() {
+        let code1: &str = r"
+            a * b + c
+        ";
+        let code2: &str = r"
+            a + b * c
+        ";
+        let result1 = Expr::parse(code1).expect("Test code failed to parse");
+        let result2 = Expr::parse(code2).expect("Test code failed to parse");
+        let desired_result1 = Expr::plus(
+            Expr::times(Expr::object("a"), Expr::object("b")),
+            Expr::object("c"),
+        );
+        let desired_result2 = Expr::plus(
+            Expr::object("a"),
+            Expr::times(Expr::object("b"), Expr::object("c")),
+        );
+        assert_eq!(result1, desired_result1);
+        assert_eq!(result2, desired_result2);
+    }
+
+    #[test]
+    fn test_comp() {
+        let code: &str = r#"~x"#;
+        let result = Expr::parse(code).expect("Test code failed to parse");
+        let desired_result = Expr::comp(Expr::object("x"));
+        assert_eq!(result, desired_result);
+    }
+
+    #[test]
+    fn test_not_compare_comp() {
         let code: &str = r#"
-           not x
+           not x < ~ y 
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::not(Expr::object("x"));
+        let desired_result = Expr::not(Expr::lt(Expr::object("x"), Expr::comp(Expr::object("y"))));
         assert_eq!(result, desired_result);
     }
 
@@ -807,13 +905,6 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::isvoid(Expr::object("x"));
-        assert_eq!(result, desired_result);
-    }
-    #[test]
-    fn test_comp() {
-        let code: &str = r#"~x"#;
-        let result = Expr::parse(code).expect("Test code failed to parse");
-        let desired_result = Expr::comp(Expr::object("x"));
         assert_eq!(result, desired_result);
     }
 
@@ -856,6 +947,26 @@ mod parse_tests {
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::plus(Expr::object("x"), Expr::object("y"));
         assert_eq!(result, desired_result);
+    }
+
+    #[test]
+    fn test_at_sign() {
+        let code1: &str = r#"
+            ~b@T.f()
+        "#;
+        let code2: &str = r#"
+            a + b@T.f()
+        "#;
+        let result1 = Expr::parse(code1).expect("Test code failed to parse");
+        let result2 = Expr::parse(code2).expect("Test code failed to parse");
+        let desired_result1 =
+            Expr::comp(Expr::static_dispatch(Expr::object("b"), "T", "f", vec![]));
+        let desired_result2 = Expr::plus(
+            Expr::object("a"),
+            Expr::static_dispatch(Expr::object("b"), "T", "f", vec![]),
+        );
+        assert_eq!(result1, desired_result1);
+        assert_eq!(result2, desired_result2);
     }
 
     #[test]
