@@ -848,7 +848,7 @@ mod parse_tests {
         println!("{:?}", result);
     }
 
-    // #[test]
+    #[test]
     fn test_arith_in_parens() {
         let code: &str = r#"
             (x + y)
@@ -871,7 +871,7 @@ mod parse_tests {
         assert_eq!(result, desired_result);
     }
 
-    //#[test]
+    #[test]
     fn test_arith_in_if() {
         let code: &str = r#"
             if x + y then a else b fi

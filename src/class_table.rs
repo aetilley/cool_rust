@@ -388,6 +388,11 @@ mod class_table_tests {
             "Apple".to_owned() => hash_set!{
                 "Orange".to_owned(),
             },
+            "Bool".to_owned() => hash_set!{},
+            "Int".to_owned() => hash_set!{},
+            "Str".to_owned() => hash_set!{},
+            "IO".to_owned() => hash_set!{},
+            "Orange".to_owned() => hash_set!{},
         };
         let desired_class_method_param_types = hash_map! {
             "Object".to_owned() => hash_map!{
@@ -469,16 +474,6 @@ mod class_table_tests {
         let program = Program::parse(code).unwrap();
         let result = ClassTable::new(&program.classes);
         assert!(result.is_err());
-    }
-
-    //#[test]
-    fn test_detect_get_return_type() {
-        assert!(false);
-    }
-
-    //#[test]
-    fn test_detect_get_param_types() {
-        assert!(false);
     }
 
     #[test]

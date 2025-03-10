@@ -94,78 +94,92 @@ pub FeaturesTy: Features = {
 }
 
 pub ExprTy: Expr = {
-  // Precedence 10
+  <e: Expr10Ty> => e,
+}
 
-  #[precedence(level="10")]
+pub Expr10Ty: Expr = {
   "{" <exprs: ExprsWithSemicolonsTy> "}" => Expr::block(exprs),
-
-  #[precedence(level="10")]
   "new" <typ: "typeid"> => Expr::new(&typ),
-  #[precedence(level="10")]
   "while" <cond: ExprTy> "loop" <body: ExprTy> "pool" => Expr::r#loop(cond, body),
-  #[precedence(level="10")]
   "case" <expr: ExprTy> "of" <cases: CasesTy> "esac" => Expr::typcase(expr, cases),
-  #[precedence(level="10")]
   "let" <let_bindings: LetBindingsTy> "in" <body: ExprTy> => LetBinding::unwrap_let_bindings(let_bindings, body),
+  
+  "if" <pred: ExprTy> "then" <then_expr: ExprTy> "else" <else_expr: ExprTy> "fi" => Expr::cond(pred, then_expr, else_expr),
+  <e: Expr9Ty> => e,
+}
 
   
+pub Expr9Ty: Expr = {
   // Precedence 9
-  #[precedence(level="9")] #[assoc(side="right")]
-  <var: "objectid"> "<-" <expr: ExprTy> => Expr::assign(&var, expr),
+  <var: "objectid"> "<-" <expr: Expr9Ty> => Expr::assign(&var, expr),
+  <e: Expr8Ty> => e,
+}
 
+pub Expr8Ty: Expr = {
   // Precedence 8
-  #[precedence(level="8")]
-  "not" <e: ExprTy> => Expr::not(e),
+  "not" <e: Expr7Ty> => Expr::not(e),
+  <e: Expr7Ty> => e,
+}
 
+
+pub Expr7Ty: Expr = {
   // Precedence 7
-  #[precedence(level="7")] #[assoc(side="left")]
-  <e1: ExprTy> "=" <e2: ExprTy> => Expr::eq(e1, e2),
-  #[precedence(level="7")] #[assoc(side="left")]
-  <e1: ExprTy> "<=" <e2: ExprTy> => Expr::leq(e1, e2),
-  #[precedence(level="7")] #[assoc(side="left")]
-  <e1: ExprTy> "<" <e2: ExprTy> => Expr::lt(e1, e2),
+  <e1: Expr7Ty> "=" <e2: Expr6Ty> => Expr::eq(e1, e2),
+  <e1: Expr7Ty> "<=" <e2: Expr6Ty> => Expr::leq(e1, e2),
+  <e1: Expr7Ty> "<" <e2: Expr6Ty> => Expr::lt(e1, e2),
+  <e: Expr6Ty> => e,
+}
 
+
+pub Expr6Ty: Expr = {
   // Precedence 6
-  #[precedence(level="6")] #[assoc(side="left")]
-  <e1: ExprTy> "+" <e2: ExprTy> => Expr::plus(e1, e2),
-  #[precedence(level="6")] #[assoc(side="left")]
-  <e1: ExprTy> "-" <e2: ExprTy> => Expr::minus(e1, e2),
+  <e1: Expr6Ty> "+" <e2: Expr5Ty> => Expr::plus(e1, e2),
+  <e1: Expr6Ty> "-" <e2: Expr5Ty> => Expr::minus(e1, e2),
+  <e: Expr5Ty> => e,
+}
 
+
+pub Expr5Ty: Expr = {
   // Precedence 5
-  #[precedence(level="5")] #[assoc(side="left")]
-  <e1: ExprTy> "*" <e2: ExprTy> => Expr::times(e1, e2),
-  #[precedence(level="5")] #[assoc(side="left")]
-  <e1: ExprTy> "/" <e2: ExprTy> => Expr::divide(e1, e2),
+  <e1: Expr5Ty> "*" <e2: Expr4Ty> => Expr::times(e1, e2),
+  <e1: Expr5Ty> "/" <e2: Expr4Ty> => Expr::divide(e1, e2),
+  <e: Expr4Ty> => e,
+}
 
+
+pub Expr4Ty: Expr = {
   // Precedence 4
-  #[precedence(level="4")]
-  "isvoid" <expr: ExprTy> => Expr::isvoid(expr),
+  "isvoid" <expr: Expr3Ty> => Expr::isvoid(expr),
+  <e: Expr3Ty> => e,
+}
 
+
+pub Expr3Ty: Expr = {
   // Precedence 3
-  #[precedence(level="3")]
-  "~" <expr: ExprTy> => Expr::comp(expr),
+  "~" <expr: Expr2Ty> => Expr::comp(expr),
+  <e: Expr2Ty> => e,
+}
 
+
+pub Expr2Ty: Expr = {
   // Precedence 2
-  #[precedence(level="2")]
-  <slf: ExprTy> "@" <typ: "typeid"> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::static_dispatch(slf, &typ, &method_name, exprs),
-
-  // Precedence 1
-  #[precedence(level="1")]
-  <slf: ExprTy> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(slf, &method_name, exprs),
-    #[precedence(level="1")]
+  <slf: Expr1Ty> "@" <typ: "typeid"> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::static_dispatch(slf, &typ, &method_name, exprs),
   <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(Expr::no_expr(), &method_name, exprs),
-  #[precedence(level="1")]
-  "if" <pred: ExprTy> "then" <then_expr: ExprTy> "else" <else_expr: ExprTy> "fi" => Expr::cond(pred, then_expr, else_expr),
+  <e: Expr1Ty> => e,
+}
 
-  #[precedence(level="0")]
+
+pub Expr1Ty: Expr = {
+  // Precedence 1
+  <slf: Expr0Ty> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(slf, &method_name, exprs),
+  <e: Expr0Ty> => e,
+}
+
+pub Expr0Ty: Expr = {
   <name: "objectid"> => Expr::object(&name),
-  #[precedence(level="0")]
   <value: "int_const"> => Expr::int_const(&value),
-  #[precedence(level="0")]
   <maybe_value: "str_const"> => Expr::str_const(&maybe_value.unwrap()),
-  #[precedence(level="0")]
   <value: BoolConstTy> => Expr::bool_const(value),
-    #[precedence(level="0")] 
   "(" <expr: ExprTy> ")" => expr,
 }
 
