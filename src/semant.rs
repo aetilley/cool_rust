@@ -139,7 +139,7 @@ impl Analyze for Expr {
             } => {
                 slf.analyze(ct, env, cls)?;
 
-                let param_types = ct.get_param_types(&slf.stype, method_name)?;
+                let param_types = ct.get_param_types_dynamic(&slf.stype, method_name)?;
 
                 for (next_param, arg) in args.iter_mut().enumerate() {
                     arg.analyze(ct, env, cls)?;
@@ -155,7 +155,7 @@ impl Analyze for Expr {
                     }
                 }
 
-                let mut return_type = ct.get_return_type(&slf.stype, method_name)?;
+                let mut return_type = ct.get_return_type_dynamic(&slf.stype, method_name)?;
 
                 if return_type == "SELF_TYPE" {
                     return_type = slf.stype.clone();
@@ -555,7 +555,7 @@ mod semant_tests {
         assert_eq!(expr.stype, "Banana");
     }
 
-    // #[test]
+    #[test]
     fn test_semant_dynamic_dispatch_nontrivial() {
         let cls_cd_1: &str = r"
         class Apple {foo(): Banana {42};};

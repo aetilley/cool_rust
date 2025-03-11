@@ -239,6 +239,27 @@ impl ClassTable {
         }
     }
 
+    pub fn get_param_types_dynamic(
+        &self,
+        class_name: &str,
+        method_name: &str,
+    ) -> Result<Formals, SemanticAnalysisError> {
+        
+        if let Ok(params) = self.get_param_types(class_name, method_name) {
+            return Ok(params);
+        }
+
+        let mut next = class_name;
+        while let Some(parent) = self.class_parent.get(class_name) {
+            match self.get_param_types(next, method_name) {
+                Err(_) => {next = parent;},
+                Ok(params) => {return Ok(params);},
+            }
+        }
+        let msg = format!("No method {} found for class {} or for any ancestor.", method_name, class_name);
+        Err(SemanticAnalysisError{msg})
+    }
+
     pub fn get_return_type(
         &self,
         class_name: &str,
@@ -257,6 +278,27 @@ impl ClassTable {
                 Some(return_type) => Ok(return_type.clone()),
             },
         }
+    }
+
+    pub fn get_return_type_dynamic(
+        &self,
+        class_name: &str,
+        method_name: &str,
+    ) -> Result<String, SemanticAnalysisError> {
+        
+        if let Ok(typ) = self.get_return_type(class_name, method_name) {
+            return Ok(typ);
+        }
+
+        let mut next = class_name;
+        while let Some(parent) = self.class_parent.get(class_name) {
+            match self.get_return_type(next, method_name) {
+                Err(_) => {next = parent;},
+                Ok(typ) => {return Ok(typ);},
+            }
+        }
+        let msg = format!("No method {} found for class {} or for any ancestor.", method_name, class_name);
+        Err(SemanticAnalysisError{msg})
     }
 
     pub fn get_lub(&self, t1: &str, t2: &str) -> String {
