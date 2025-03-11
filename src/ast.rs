@@ -4,13 +4,10 @@ use std::fmt::Debug;
 
 use crate::cool_grammar::{ClassTyParser, ExprTyParser, FeatureTyParser, ProgramTyParser};
 use crate::token::{strip_long_comments, CoolLexer, LexicalError, Token};
+use crate::symbol::{Sym, sym};
 
 use lalrpop_util::ParseError;
-use ustr::{ustr, Ustr};
-type Sym = Ustr;
-fn sym(s: &str) -> Ustr {
-    ustr(s)
-}
+
 
 pub fn add_one<T: Clone>(some: &Vec<T>, one: &T) -> Vec<T> {
     // Takes ownership

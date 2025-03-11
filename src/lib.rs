@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod ast;
+pub mod symbol;
 pub mod class_table;
 pub mod env;
 pub mod semant;

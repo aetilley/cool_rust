@@ -1,6 +1,8 @@
 use std::collections::hash_map::HashMap;
 
-type Scope = HashMap<String, String>;
+use crate::symbol::Sym;
+
+type Scope = HashMap<Sym, Sym>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Env {
@@ -29,24 +31,24 @@ impl Env {
         self.stack.pop();
     }
 
-    pub fn lookup(&self, key: &str) -> Option<String> {
+    pub fn lookup(&self, key: &Sym) -> Option<Sym> {
         // Start search from top of stack.
         for scope in self.stack.iter().rev() {
             if let Some(value) = scope.get(key) {
-                return Some(value.to_owned());
+                return Some(value.clone());
             }
         }
         None
     }
 
-    pub fn add_binding(&mut self, key: &str, value: &str) {
+    pub fn add_binding(&mut self, key: &Sym, value: &Sym) {
         // NOTE:  Currently does not throw if the key already exists
         // in the current scope. Sometimes we may want to throw an error
         // E.g. if a symbol appears twice in a function param list.
         let top = self.stack.last_mut();
         match top {
             Some(frame) => {
-                frame.insert(key.to_owned(), value.to_owned());
+                frame.insert(key.clone(), value.clone());
             }
             None => {
                 self.enter_scope();
@@ -60,16 +62,17 @@ impl Env {
 mod env_tests {
 
     use super::*;
+    use crate::symbol::sym;
 
     #[test]
     pub fn scope_test() {
-        let key1 = "key1".to_owned();
-        let key2 = "key2".to_owned();
-        let key3 = "key3".to_owned();
-        let val1 = "val1".to_owned();
-        let val2_1 = "val2_1".to_owned();
-        let val2_2 = "val2_2".to_owned();
-        let val3 = "val3".to_owned();
+        let key1 = sym("key1");
+        let key2 = sym("key2");
+        let key3 = sym("key3");
+        let val1 = sym("val1");
+        let val2_1 = sym("val2_1");
+        let val2_2 = sym("val2_2");
+        let val3 = sym("val3");
 
         let mut env = Env::new();
 

@@ -11,6 +11,7 @@ use crate::ast::{
 };
 use crate::class_table::ClassTable;
 use crate::env::Env;
+use crate::symbol::{Sym, sym};
 
 #[derive(Debug, PartialEq)]
 pub struct SemanticAnalysisError {
@@ -40,10 +41,10 @@ impl Class {
     pub fn semant(&mut self, ct: &ClassTable, env: &mut Env) -> Result<(), SemanticAnalysisError> {
         env.enter_scope();
 
-        env.add_binding("self", self.name.as_ref());
+        env.add_binding(&sym("self"), &self.name);
 
         for feature in self.features.iter_mut() {
-            feature.analyze(ct, env, &self.name.to_owned())?;
+            feature.analyze(ct, env, &self.name.clone())?;
         }
 
         env.exit_scope();
@@ -56,7 +57,7 @@ pub trait Analyze {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: &str,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError>;
 }
 
@@ -65,7 +66,7 @@ impl Analyze for Feature {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: &str,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         match self {
             Feature::Attr { name, typ, init } => {
@@ -78,7 +79,7 @@ impl Analyze for Feature {
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
-                env.add_binding(name.as_ref(), typ.as_ref());
+                env.add_binding(&name, &typ);
             }
             Feature::Method {
                 name,
@@ -88,7 +89,7 @@ impl Analyze for Feature {
             } => {
                 env.enter_scope();
                 for formal in formals {
-                    env.add_binding(formal.name.as_ref(), formal.typ.as_ref());
+                    env.add_binding(&formal.name, &formal.typ);
                 }
                 body.analyze(ct, env, cls)?;
                 env.exit_scope();
@@ -111,7 +112,7 @@ impl Analyze for Case {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: &str,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         env.enter_scope();
         env.add_binding(&self.id, &self.typ);
@@ -126,10 +127,10 @@ impl Analyze for Expr {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: &str,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         // Set the `self.stype` field.
-        let stype: String;
+        let stype: Sym;
 
         match &mut *self.data {
             ExprData::Dispatch {
@@ -201,14 +202,14 @@ impl Analyze for Expr {
 
                 let mut return_type = ct.get_return_type(typ, method_name)?;
 
-                if return_type == "SELF_TYPE" {
+                if return_type == sym("SELF_TYPE") {
                     return_type = slf.stype.clone();
                 }
                 stype = return_type;
             }
 
             ExprData::TypCase { expr, cases } => {
-                let mut lub = "No_type".to_owned();
+                let mut lub = sym("No_type");
                 expr.analyze(ct, env, cls)?;
                 for case in cases.iter_mut() {
                     case.analyze(ct, env, cls)?;
@@ -245,7 +246,7 @@ impl Analyze for Expr {
 
             ExprData::Loop { pred, body } => {
                 pred.analyze(ct, env, cls)?;
-                if &pred.stype != "Bool" {
+                if pred.stype != sym("Bool") {
                     let msg = format!(
                         "In class {}, while-loop predicate was of non-Bool type {}",
                         cls, pred.stype
@@ -253,7 +254,7 @@ impl Analyze for Expr {
                     return Err(SemanticAnalysisError { msg });
                 }
                 body.analyze(ct, env, cls)?;
-                stype = "Object".to_owned();
+                stype = sym("Object");
             }
 
             ExprData::Cond {
@@ -262,7 +263,7 @@ impl Analyze for Expr {
                 else_expr,
             } => {
                 pred.analyze(ct, env, cls)?;
-                if &pred.stype != "Bool" {
+                if pred.stype != sym("Bool") {
                     let msg = format!(
                         "In class {}, conditional predicate was of non-Bool type {}",
                         cls, pred.stype
@@ -311,56 +312,56 @@ impl Analyze for Expr {
                 }
             }
             ExprData::NoExpr {} => {
-                stype = "No_type".to_owned();
+                stype = sym("No_type");
             }
             ExprData::IntConst { val: _ } => {
-                stype = "Int".to_owned();
+                stype = sym("Int");
             }
             ExprData::StrConst { val: _ } => {
-                stype = "Str".to_owned();
+                stype = sym("Str");
             }
             ExprData::BoolConst { val: _ } => {
-                stype = "Bool".to_owned();
+                stype = sym("Bool");
             }
             ExprData::IsVoid { expr } => {
                 expr.analyze(ct, env, cls)?;
-                if &expr.stype != "Bool" {
+                if expr.stype != sym("Bool") {
                     let msg = format!(
                         "In class {}, isvoid arg was of non-Bool type {}",
                         cls, expr.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
-                stype = "Bool".to_owned();
+                stype = sym("Bool");
             }
             ExprData::New { typ } => {
-                stype = typ.to_owned();
+                stype = typ.clone();
             }
             ExprData::Not { expr } => {
                 expr.analyze(ct, env, cls)?;
-                if &expr.stype != "Bool" {
+                if expr.stype != sym("Bool") {
                     let msg = format!(
                         "In class {}, not arg was of non-Bool type {}",
                         cls, expr.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
-                stype = "Bool".to_owned();
+                stype = sym("Bool");
             }
             ExprData::Comp { expr } => {
                 expr.analyze(ct, env, cls)?;
-                if &expr.stype != "Int" {
+                if expr.stype != sym("Int") {
                     let msg = format!(
                         "In class {}, comp arg was of non-Int type {}",
                         cls, expr.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
-                stype = "Int".to_owned();
+                stype = sym("Int");
             }
             ExprData::Lt { lhs, rhs } | ExprData::Leq { lhs, rhs } => {
                 lhs.analyze(ct, env, cls)?;
-                if &lhs.stype != "Int" {
+                if lhs.stype != sym("Int") {
                     let msg = format!(
                         "In class {}, operator lhs was of non-Int type {}",
                         cls, lhs.stype
@@ -368,28 +369,28 @@ impl Analyze for Expr {
                     return Err(SemanticAnalysisError { msg });
                 }
                 rhs.analyze(ct, env, cls)?;
-                if &rhs.stype != "Int" {
+                if rhs.stype != sym("Int") {
                     let msg = format!(
                         "In class {}, operator rhs was of non-Int type {}",
                         cls, rhs.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
-                stype = "Bool".to_owned();
+                stype = sym("Bool");
             }
             ExprData::Eq { lhs, rhs } => {
                 // Unlike < and <=, the = operator can take arbitrary types.
                 lhs.analyze(ct, env, cls)?;
                 rhs.analyze(ct, env, cls)?;
 
-                let mut comp_as_type: &str = "Object";
-                if (&lhs.stype == "Int") | (&lhs.stype == "Str") | (&lhs.stype == "Bool") {
-                    comp_as_type = &lhs.stype;
+                let mut comp_as_type = sym("Object");
+                if (lhs.stype == sym("Int")) | (lhs.stype == sym("Str")) | (lhs.stype == sym("Bool")) {
+                    comp_as_type = lhs.stype;
                 }
-                if (&rhs.stype == "Int") | (&rhs.stype == "Str") | (&rhs.stype == "Bool") {
-                    comp_as_type = &rhs.stype;
+                if (rhs.stype == sym("Int")) | (rhs.stype == sym("Str")) | (rhs.stype == sym("Bool")) {
+                    comp_as_type = rhs.stype;
                 }
-                if comp_as_type != "Object" && lhs.stype != rhs.stype {
+                if comp_as_type != sym("Object") && lhs.stype != rhs.stype {
                     let msg = format!(
                         "In class {}, equality operands had incompatible types lhs: {} and rhs: {}.",
                         cls, lhs.stype, rhs.stype
@@ -397,7 +398,7 @@ impl Analyze for Expr {
                     return Err(SemanticAnalysisError { msg });
                 }
 
-                stype = "Bool".to_owned();
+                stype = sym("Bool");
             }
 
             ExprData::Plus { lhs, rhs }
@@ -405,7 +406,7 @@ impl Analyze for Expr {
             | ExprData::Times { lhs, rhs }
             | ExprData::Divide { lhs, rhs } => {
                 lhs.analyze(ct, env, cls)?;
-                if &lhs.stype != "Int" {
+                if lhs.stype != sym("Int") {
                     let msg = format!(
                         "In class {}, operator lhs was of non-Int type {}",
                         cls, lhs.stype
@@ -413,14 +414,14 @@ impl Analyze for Expr {
                     return Err(SemanticAnalysisError { msg });
                 }
                 rhs.analyze(ct, env, cls)?;
-                if &rhs.stype != "Int" {
+                if rhs.stype != sym("Int") {
                     let msg = format!(
                         "In class {}, operator rhs was of non-Int type {}",
                         cls, rhs.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
-                stype = "Int".to_owned();
+                stype = sym("Int");
             }
             ExprData::Object { id } => match env.lookup(id) {
                 None => {
@@ -473,25 +474,25 @@ mod semant_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
 
         let mut f1 = Feature::parse(c1).unwrap();
-        let result = f1.analyze(&ct, &mut env, "UNUSED");
+        let result = f1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f2 = Feature::parse(c2).unwrap();
-        let result = f2.analyze(&ct, &mut env, "UNUSED");
+        let result = f2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f3 = Feature::parse(c3).unwrap();
-        let result = f3.analyze(&ct, &mut env, "UNUSED");
+        let result = f3.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f4 = Feature::parse(c4).unwrap();
-        let result = f4.analyze(&ct, &mut env, "UNUSED");
+        let result = f4.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut desired_env = Env::new();
-        desired_env.add_binding("a", "Int");
-        desired_env.add_binding("b", "Banana");
-        desired_env.add_binding("c", "Banana");
+        desired_env.add_binding(&sym("a"), &sym("Int"));
+        desired_env.add_binding(&sym("b"), &sym("Banana"));
+        desired_env.add_binding(&sym("c"), &sym("Banana"));
         assert_eq!(env, desired_env);
     }
 
@@ -512,14 +513,14 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, "UNUSED");
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, "UNUSED");
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
-        assert_eq!(expr.stype, "Banana");
+        assert_eq!(expr.stype, sym("Banana"));
     }
 
     #[test]
@@ -545,14 +546,14 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, "UNUSED");
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, "UNUSED");
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
-        assert_eq!(expr.stype, "Banana");
+        assert_eq!(expr.stype, sym("Banana"));
     }
 
     #[test]
@@ -578,14 +579,14 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, "UNUSED");
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, "UNUSED");
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
-        assert_eq!(expr.stype, "Banana");
+        assert_eq!(expr.stype, sym("Banana"));
     }
 
     #[test]
@@ -598,9 +599,9 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, "UNUSED");
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
-        assert_eq!(e1.stype, "Int".to_string());
+        assert_eq!(e1.stype, sym("Int"));
     }
 
     #[test]
@@ -613,9 +614,9 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, "UNUSED");
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
-        assert_eq!(e1.stype, "Str".to_string());
+        assert_eq!(e1.stype, sym("Str"));
     }
     #[test]
     fn test_semant_exprs_bool() {
@@ -627,9 +628,9 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, "UNUSED");
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
-        assert_eq!(e1.stype, "Bool".to_string());
+        assert_eq!(e1.stype, sym("Bool"));
     }
 
     #[test]
@@ -642,9 +643,9 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, "UNUSED");
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
-        assert_eq!(e1.stype, "Int".to_string());
+        assert_eq!(e1.stype, sym("Int"));
     }
 
     #[test]
@@ -660,11 +661,11 @@ mod semant_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
 
         let mut f1 = Feature::parse(c1).unwrap();
-        let result = f1.analyze(&ct, &mut env, "UNUSED");
+        let result = f1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f2 = Feature::parse(c2).unwrap();
-        let result = f2.analyze(&ct, &mut env, "UNUSED");
+        let result = f2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let c1: &str = r#"
@@ -675,12 +676,12 @@ mod semant_tests {
         "#;
         let mut e1 = Expr::parse(c1).unwrap();
         let mut e2 = Expr::parse(c2).unwrap();
-        let result1 = e1.analyze(&ct, &mut env, "UNUSED");
-        let result2 = e2.analyze(&ct, &mut env, "UNUSED");
+        let result1 = e1.analyze(&ct, &mut env, &sym("UNUSED"));
+        let result2 = e2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result1, Ok(()));
         assert_eq!(result2, Ok(()));
-        assert_eq!(e1.stype, "Apple");
-        assert_eq!(e2.stype, "Banana");
+        assert_eq!(e1.stype, sym("Apple"));
+        assert_eq!(e2.stype, sym("Banana"));
     }
 
     #[test]
@@ -698,30 +699,30 @@ mod semant_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
 
         let mut f1 = Feature::parse(c1).unwrap();
-        let result = f1.analyze(&ct, &mut env, "UNUSED");
+        let result = f1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f2 = Feature::parse(c2).unwrap();
-        let result = f2.analyze(&ct, &mut env, "UNUSED");
+        let result = f2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f3 = Feature::parse(c3).unwrap();
-        let result = f3.analyze(&ct, &mut env, "UNUSED");
+        let result = f3.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let code: &str = r#"
         if c then a else b fi
         "#;
         let mut expr = Expr::parse(code).expect("Test code failed to parse");
-        let result = expr.analyze(&ct, &mut env, "UNUSED");
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
-        assert_eq!(expr.stype, "Object");
+        assert_eq!(expr.stype, sym("Object"));
 
         let code: &str = r#"
         if a then a else b fi
         "#;
         let mut expr = Expr::parse(code).expect("Test code failed to parse");
-        let result = expr.analyze(&ct, &mut env, "UNUSED");
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result.is_err());
     }
 
@@ -738,8 +739,8 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, "UNUSED");
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
-        assert_eq!(e1.stype, "Int".to_string());
+        assert_eq!(e1.stype, sym("Int"));
     }
 }

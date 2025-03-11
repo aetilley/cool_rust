@@ -5,17 +5,19 @@ use crate::ast::Expr;
 use crate::ast::{Class, Classes, Feature, Formal, Formals};
 use crate::semant::SemanticAnalysisError;
 
+use crate::symbol::{Sym, sym};
+
 use common_macros::hash_set;
 
-type ClassParentTy = HashMap<String, String>;
-type ClassChildrenTy = HashMap<String, HashSet<String>>;
-type ClassMethodParamTypesTy = HashMap<String, HashMap<String, Formals>>;
-type ClassMethodReturnTypeTy = HashMap<String, HashMap<String, String>>;
+type ClassParentTy = HashMap<Sym, Sym>;
+type ClassChildrenTy = HashMap<Sym, HashSet<Sym>>;
+type ClassMethodParamTypesTy = HashMap<Sym, HashMap<Sym, Formals>>;
+type ClassMethodReturnTypeTy = HashMap<Sym, HashMap<Sym, Sym>>;
 
 #[derive(Debug, PartialEq)]
 pub struct ClassTable {
-    native_classes: HashSet<String>,
-    classes: HashSet<String>,
+    native_classes: HashSet<Sym>,
+    classes: HashSet<Sym>,
     class_parent: ClassParentTy,
     class_children: ClassChildrenTy,
     class_method_param_types: ClassMethodParamTypesTy,
@@ -91,8 +93,8 @@ impl ClassTable {
     }
 
     fn _mark_descendants(
-        node: &str,
-        visited: &mut HashSet<String>,
+        node: &Sym,
+        visited: &mut HashSet<Sym>,
         class_children: &ClassChildrenTy,
     ) -> Result<(), SemanticAnalysisError> {
         match class_children.get(node) {
@@ -106,7 +108,7 @@ impl ClassTable {
                         );
                         return Err(SemanticAnalysisError { msg });
                     }
-                    visited.insert(child.to_owned());
+                    visited.insert(child.clone());
                     ClassTable::_mark_descendants(child, visited, class_children)?;
                 }
                 Ok(())
@@ -115,14 +117,14 @@ impl ClassTable {
     }
 
     fn detect_cycles(class_children: &ClassChildrenTy) -> Result<(), SemanticAnalysisError> {
-        let root = "Object";
-        let mut visited = HashSet::<String>::new();
-        visited.insert(root.to_owned());
-        ClassTable::_mark_descendants(root, &mut visited, class_children)
+        let root = sym("Object");
+        let mut visited = HashSet::<Sym>::new();
+        visited.insert(root);
+        ClassTable::_mark_descendants(&root, &mut visited, class_children)
             .expect("We really should not be getting loops involving Object");
         let mut detached_classes = hash_set! {};
         for key in class_children.keys() {
-            if !visited.contains::<String>(key) {
+            if !visited.contains::<Sym>(key) {
                 detached_classes.insert(key.clone());
             }
         }
@@ -157,8 +159,8 @@ impl ClassTable {
                 .or_insert(hash_set! {});
         }
 
-        let mut method_param_types = HashMap::<String, Formals>::new();
-        let mut method_return_type = HashMap::<String, String>::new();
+        let mut method_param_types = HashMap::<Sym, Formals>::new();
+        let mut method_return_type = HashMap::<Sym, Sym>::new();
 
         for feature in class.features.iter() {
             if let Feature::Method {
@@ -178,10 +180,10 @@ impl ClassTable {
     }
 
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
-        let mut class_parent = HashMap::<String, String>::new();
-        let mut class_children = HashMap::<String, HashSet<String>>::new();
-        let mut class_method_param_types = HashMap::<String, HashMap<String, Formals>>::new();
-        let mut class_method_return_type = HashMap::<String, HashMap<String, String>>::new();
+        let mut class_parent = HashMap::<Sym, Sym>::new();
+        let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
+        let mut class_method_param_types = HashMap::<Sym, HashMap<Sym, Formals>>::new();
+        let mut class_method_return_type = HashMap::<Sym, HashMap<Sym, Sym>>::new();
 
         let native_classes = ClassTable::create_native_classes();
         for class in native_classes.iter() {
@@ -221,8 +223,8 @@ impl ClassTable {
 
     pub fn get_param_types(
         &self,
-        class_name: &str,
-        method_name: &str,
+        class_name: &Sym,
+        method_name: &Sym,
     ) -> Result<Formals, SemanticAnalysisError> {
         match self.class_method_param_types.get(class_name) {
             None => {
@@ -241,8 +243,8 @@ impl ClassTable {
 
     pub fn get_param_types_dynamic(
         &self,
-        class_name: &str,
-        method_name: &str,
+        class_name: &Sym,
+        method_name: &Sym,
     ) -> Result<Formals, SemanticAnalysisError> {
         
         if let Ok(params) = self.get_param_types(class_name, method_name) {
@@ -262,9 +264,9 @@ impl ClassTable {
 
     pub fn get_return_type(
         &self,
-        class_name: &str,
-        method_name: &str,
-    ) -> Result<String, SemanticAnalysisError> {
+        class_name: &Sym,
+        method_name: &Sym,
+    ) -> Result<Sym, SemanticAnalysisError> {
         match self.class_method_return_type.get(class_name) {
             None => {
                 let msg = format!("No methods found for class {}.", class_name);
@@ -282,9 +284,9 @@ impl ClassTable {
 
     pub fn get_return_type_dynamic(
         &self,
-        class_name: &str,
-        method_name: &str,
-    ) -> Result<String, SemanticAnalysisError> {
+        class_name: &Sym,
+        method_name: &Sym,
+    ) -> Result<Sym, SemanticAnalysisError> {
         
         if let Ok(typ) = self.get_return_type(class_name, method_name) {
             return Ok(typ);
@@ -301,7 +303,7 @@ impl ClassTable {
         Err(SemanticAnalysisError{msg})
     }
 
-    pub fn get_lub(&self, t1: &str, t2: &str) -> String {
+    pub fn get_lub(&self, t1: &Sym, t2: &Sym) -> Sym {
         // In order to comput the least upper bound of two types, we
         // comput the two ancestries to the root "Object" and then
         // read them both backwards to find the first place they diverge.
@@ -326,18 +328,18 @@ impl ClassTable {
         let mut lub = e1;
         for (e1, e2) in rev_pairs {
             if e1 != e2 {
-                return lub.to_owned();
+                return lub.clone();
             }
             lub = e1
         }
-        lub.to_owned()
+        lub.clone()
     }
 
-    pub fn assert_subtype(&self, t1: &str, t2: &str) -> Result<(), SemanticAnalysisError> {
+    pub fn assert_subtype(&self, t1: &Sym, t2: &Sym) -> Result<(), SemanticAnalysisError> {
         // If this function gets called on "No_type" almost certainly something has
         // gone wrong.
-        assert_ne!(t1, "No_type");
-        assert_ne!(t2, "No_type");
+        assert_ne!(t1, &sym("No_type"));
+        assert_ne!(t2, &sym("No_type"));
 
         if t1 == t2 {
             return Ok(());
@@ -366,21 +368,21 @@ mod class_table_tests {
     #[test]
     fn test_assert_subtype() {
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = "Int";
-        let t2 = "Int";
-        let result = ct.assert_subtype(t1, t2);
+        let t1 = sym("Int");
+        let t2 = sym("Int");
+        let result = ct.assert_subtype(&t1, &t2);
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = "Int";
-        let t2 = "Object";
-        let result = ct.assert_subtype(t1, t2);
+        let t1 = sym("Int");
+        let t2 = sym("Object");
+        let result = ct.assert_subtype(&t1, &t2);
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = "Object";
-        let t2 = "Int";
-        let result = ct.assert_subtype(t1, t2);
+        let t1 = sym("Object");
+        let t2 = sym("Int");
+        let result = ct.assert_subtype(&t1, &t2);
         assert!(result.is_err());
     }
 
@@ -398,95 +400,95 @@ mod class_table_tests {
         let result = ClassTable::new(&program.classes).unwrap();
 
         let desired_classes = hash_set! {
-            "Apple".to_owned(),
-            "Orange".to_owned(),
+            sym("Apple"),
+            sym("Orange"),
         };
 
         let desired_native_classes = hash_set! {
-            "Int".to_owned(),
-            "IO".to_owned(),
-            "Bool".to_owned(),
-            "Str".to_owned(),
-            "Object".to_owned(),
+            sym("Int"),
+            sym("IO"),
+            sym("Bool"),
+            sym("Str"),
+            sym("Object"),
         };
 
         let desired_class_parent = hash_map! {
-            "Int".to_owned()=>"Object".to_owned(),
-            "IO".to_owned()=>"Object".to_owned(),
-            "Bool".to_owned()=>"Object".to_owned(),
-            "Str".to_owned()=>"Object".to_owned(),
-            "Apple".to_owned()=>"Object".to_owned(),
-            "Orange".to_owned()=>"Apple".to_owned(),
+            sym("Int")=>sym("Object"),
+            sym("IO")=>sym("Object"),
+            sym("Bool")=>sym("Object"),
+            sym("Str")=>sym("Object"),
+            sym("Apple")=>sym("Object"),
+            sym("Orange")=>sym("Apple"),
         };
 
         let desired_class_children = hash_map! {
-            "Object".to_owned() => hash_set!{
-                "IO".to_owned(),
-                "Str".to_owned(),
-                "Bool".to_owned(),
-                "Int".to_owned(),
-                "Apple".to_owned(),
+            sym("Object") => hash_set!{
+                sym("IO"),
+                sym("Str"),
+                sym("Bool"),
+                sym("Int"),
+                sym("Apple"),
             },
-            "Apple".to_owned() => hash_set!{
-                "Orange".to_owned(),
+            sym("Apple") => hash_set!{
+                sym("Orange"),
             },
-            "Bool".to_owned() => hash_set!{},
-            "Int".to_owned() => hash_set!{},
-            "Str".to_owned() => hash_set!{},
-            "IO".to_owned() => hash_set!{},
-            "Orange".to_owned() => hash_set!{},
+            sym("Bool") => hash_set!{},
+            sym("Int") => hash_set!{},
+            sym("Str") => hash_set!{},
+            sym("IO") => hash_set!{},
+            sym("Orange") => hash_set!{},
         };
         let desired_class_method_param_types = hash_map! {
-            "Object".to_owned() => hash_map!{
-                "abort".to_owned() => vec![],
-                "type_name".to_owned() => vec![],
-                "copy".to_owned() => vec![],
+            sym("Object") => hash_map!{
+                sym("abort") => vec![],
+                sym("type_name") => vec![],
+                sym("copy") => vec![],
             },
-            "IO".to_owned() => hash_map!{
-                "out_string".to_owned() => vec![Formal::formal("arg", "Str")],
-                "out_int".to_owned() => vec![Formal::formal("arg", "Int")],
-                "in_string".to_owned() => vec![],
-                "in_int".to_owned() => vec![],
+            sym("IO") => hash_map!{
+                sym("out_string") => vec![Formal::formal("arg", "Str")],
+                sym("out_int") => vec![Formal::formal("arg", "Int")],
+                sym("in_string") => vec![],
+                sym("in_int") => vec![],
             },
-            "Str".to_owned() => hash_map!{
-                "length".to_owned() => vec![],
-                "concat".to_owned() => vec![Formal::formal("arg", "Str")],
-                "substr".to_owned() => vec![Formal::formal("arg", "Int"), Formal::formal("arg2", "Int")],
+            sym("Str") => hash_map!{
+                sym("length") => vec![],
+                sym("concat") => vec![Formal::formal("arg", "Str")],
+                sym("substr") => vec![Formal::formal("arg", "Int"), Formal::formal("arg2", "Int")],
             },
-            "Bool".to_owned() => hash_map!{},
-            "Int".to_owned() => hash_map!{},
+            sym("Bool") => hash_map!{},
+            sym("Int") => hash_map!{},
 
-            "Apple".to_owned() => hash_map!{},
-            "Orange".to_owned() => hash_map!{
-                "foo".to_owned() => vec![],
-                "bar".to_owned() => vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")],
+            sym("Apple") => hash_map!{},
+            sym("Orange") => hash_map!{
+                sym("foo") => vec![],
+                sym("bar") => vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")],
             },
         };
 
         let desired_class_method_return_types = hash_map! {
-            "Object".to_owned() => hash_map!{
-                "abort".to_owned() => "Object".to_owned(),
-                "type_name".to_owned() => "Str".to_owned(),
-                "copy".to_owned() => "SELF_TYPE".to_owned(),
+            sym("Object") => hash_map!{
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Str"),
+                sym("copy") => sym("SELF_TYPE"),
             },
-            "IO".to_owned() => hash_map!{
-                "out_string".to_owned() => "SELF_TYPE".to_owned(),
-                "out_int".to_owned() => "SELF_TYPE".to_owned(),
-                "in_string".to_owned() => "Str".to_owned(),
-                "in_int".to_owned() => "Int".to_owned(),
+            sym("IO") => hash_map!{
+                sym("out_string") => sym("SELF_TYPE"),
+                sym("out_int") => sym("SELF_TYPE"),
+                sym("in_string") => sym("Str"),
+                sym("in_int") => sym("Int"),
             },
-            "Str".to_owned() => hash_map!{
-                "length".to_owned() => "Int".to_owned(),
-                "concat".to_owned() => "Str".to_owned(),
-                "substr".to_owned() => "Str".to_owned(),
+            sym("Str") => hash_map!{
+                sym("length") => sym("Int"),
+                sym("concat") => sym("Str"),
+                sym("substr") => sym("Str"),
             },
-            "Bool".to_owned() => hash_map!{},
-            "Int".to_owned() => hash_map!{},
+            sym("Bool") => hash_map!{},
+            sym("Int") => hash_map!{},
 
-            "Apple".to_owned() => hash_map!{},
-            "Orange".to_owned() => hash_map!{
-                "foo".to_owned() => "T2".to_owned(),
-                "bar".to_owned() => "S3".to_owned(),
+            sym("Apple") => hash_map!{},
+            sym("Orange") => hash_map!{
+                sym("foo") => sym("T2"),
+                sym("bar") => sym("S3"),
             },
         };
 
@@ -529,7 +531,7 @@ mod class_table_tests {
         ";
         let program = Program::parse(code).unwrap();
         let ct = ClassTable::new(&program.classes).unwrap();
-        let result = ct.get_lub("Kiwi", "Grape");
-        assert_eq!(result, "Orange");
+        let result = ct.get_lub(&sym("Kiwi"), &sym("Grape"));
+        assert_eq!(result, sym("Orange"));
     }
 }
