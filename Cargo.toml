@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 ustr = "1.1.0"
-symbol_table = "0.4.0"
 logos = "0.15.0"
 common_macros = "0.1.1"
 lalrpop-util = { version = "0.22.0", features = ["lexer"] }
