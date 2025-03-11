@@ -6,6 +6,11 @@ use crate::cool_grammar::{ClassTyParser, ExprTyParser, FeatureTyParser, ProgramT
 use crate::token::{strip_long_comments, CoolLexer, LexicalError, Token};
 
 use lalrpop_util::ParseError;
+use ustr::{ustr, Ustr};
+type Sym = Ustr;
+fn sym(s: &str) -> Ustr {
+    ustr(s)
+}
 
 pub fn add_one<T: Clone>(some: &Vec<T>, one: &T) -> Vec<T> {
     // Takes ownership
@@ -38,8 +43,8 @@ impl Parse for Program {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Class {
-    pub name: String,
-    pub parent: String,
+    pub name: Sym,
+    pub parent: Sym,
     pub features: Features,
 }
 pub type Classes = Vec<Class>;
@@ -47,8 +52,8 @@ pub type Classes = Vec<Class>;
 impl Class {
     pub fn class(name: &str, parent: &str, features: Features) -> Class {
         Class {
-            name: name.to_owned(),
-            parent: parent.to_owned(),
+            name: sym(name),
+            parent: sym(parent),
             features,
         }
     }
@@ -64,15 +69,15 @@ impl Parse for Class {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Formal {
-    pub name: String,
-    pub typ: String,
+    pub name: Sym,
+    pub typ: Sym,
 }
 pub type Formals = Vec<Formal>;
 impl Formal {
     pub fn formal(name: &str, typ: &str) -> Formal {
         Formal {
-            name: name.to_owned(),
-            typ: typ.to_owned(),
+            name: sym(name),
+            typ: sym(typ),
         }
     }
 }
@@ -80,14 +85,14 @@ impl Formal {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Feature {
     Attr {
-        name: String,
-        typ: String,
+        name: Sym,
+        typ: Sym,
         init: Expr,
     },
     Method {
-        name: String,
+        name: Sym,
         formals: Formals,
-        typ: String,
+        typ: Sym,
         body: Expr,
     },
 }
@@ -96,16 +101,16 @@ pub type Features = Vec<Feature>;
 impl Feature {
     pub fn attr(name: &str, typ: &str, init: Expr) -> Feature {
         Feature::Attr {
-            name: name.to_owned(),
-            typ: typ.to_owned(),
+            name: sym(name),
+            typ: sym(typ),
             init,
         }
     }
     pub fn method(name: &str, formals: Formals, typ: &str, body: Expr) -> Feature {
         Feature::Method {
-            name: name.to_owned(),
+            name: sym(name),
             formals,
-            typ: typ.to_owned(),
+            typ: sym(typ),
             body,
         }
     }
@@ -121,16 +126,16 @@ impl Parse for Feature {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Case {
-    pub id: String,
-    pub typ: String,
+    pub id: Sym,
+    pub typ: Sym,
     pub expr: Expr,
 }
 pub type Cases = Vec<Case>;
 impl Case {
     pub fn case(id: &str, typ: &str, expr: Expr) -> Self {
         Case {
-            id: id.to_owned(),
-            typ: typ.to_owned(),
+            id: sym(id),
+            typ: sym(typ),
             expr,
         }
     }
@@ -140,16 +145,16 @@ impl Case {
 // any final AST.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LetBinding {
-    id: String,
-    typ: String,
+    id: Sym,
+    typ: Sym,
     init: Expr,
 }
 pub type LetBindings = Vec<LetBinding>;
 impl LetBinding {
     pub fn let_binding(id: &str, typ: &str, init: Expr) -> LetBinding {
         LetBinding {
-            id: id.to_owned(),
-            typ: typ.to_owned(),
+            id: sym(id),
+            typ: sym(typ),
             init,
         }
     }
@@ -169,38 +174,38 @@ impl LetBinding {
 pub enum ExprData {
     NoExpr {},
     Object {
-        id: String,
+        id: Sym,
     },
     BoolConst {
         val: bool,
     },
     IntConst {
-        val: String,
+        val: Sym,
     },
     StrConst {
-        val: String,
+        val: Sym,
     },
     Dispatch {
         slf: Expr,
-        method_name: String,
+        method_name: Sym,
         args: Exprs,
     },
     StaticDispatch {
-        typ: String,
-        method_name: String,
+        typ: Sym,
+        method_name: Sym,
         args: Exprs,
         slf: Expr,
     },
     New {
-        typ: String,
+        typ: Sym,
     },
     TypCase {
         expr: Expr,
         cases: Cases,
     },
     Let {
-        id: String,
-        typ: String,
+        id: Sym,
+        typ: Sym,
         init: Expr,
         body: Expr,
     },
@@ -217,7 +222,7 @@ pub enum ExprData {
         else_expr: Expr,
     },
     Assign {
-        id: String,
+        id: Sym,
         expr: Expr,
     },
     Not {
@@ -262,12 +267,12 @@ pub enum ExprData {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Expr {
     pub data: Box<ExprData>,
-    pub stype: String,
+    pub stype: Sym,
 }
 pub type Exprs = Vec<Expr>;
 impl Expr {
     pub fn from(data: ExprData) -> Self {
-        let stype = "No_type".to_owned();
+        let stype = sym("No_type");
         Expr {
             data: Box::new(data),
             stype,
@@ -384,8 +389,8 @@ impl Expr {
 impl ExprData {
     pub fn r#let(id: &str, typ: &str, init: Expr, body: Expr) -> ExprData {
         ExprData::Let {
-            id: id.to_owned(),
-            typ: typ.to_owned(),
+            id: sym(id),
+            typ: sym(typ),
             init,
             body,
         }
@@ -396,7 +401,7 @@ impl ExprData {
     }
 
     pub fn object(id: &str) -> ExprData {
-        ExprData::Object { id: id.to_owned() }
+        ExprData::Object { id: sym(id) }
     }
 
     pub fn bool_const(val: bool) -> ExprData {
@@ -404,21 +409,17 @@ impl ExprData {
     }
 
     pub fn int_const(val: &str) -> ExprData {
-        ExprData::IntConst {
-            val: val.to_owned(),
-        }
+        ExprData::IntConst { val: sym(val) }
     }
 
     pub fn str_const(val: &str) -> ExprData {
-        ExprData::StrConst {
-            val: val.to_owned(),
-        }
+        ExprData::StrConst { val: sym(val) }
     }
 
     pub fn dispatch(slf: Expr, method_name: &str, args: Exprs) -> ExprData {
         ExprData::Dispatch {
             slf,
-            method_name: method_name.to_owned(),
+            method_name: sym(method_name),
             args,
         }
     }
@@ -426,16 +427,14 @@ impl ExprData {
     pub fn static_dispatch(elem: Expr, typ: &str, method_name: &str, args: Exprs) -> ExprData {
         ExprData::StaticDispatch {
             slf: elem,
-            typ: typ.to_owned(),
-            method_name: method_name.to_owned(),
+            typ: sym(typ),
+            method_name: sym(method_name),
             args,
         }
     }
 
     pub fn new(typ: &str) -> ExprData {
-        ExprData::New {
-            typ: typ.to_owned(),
-        }
+        ExprData::New { typ: sym(typ) }
     }
 
     pub fn typcase(expr: Expr, cases: Cases) -> ExprData {
@@ -458,10 +457,7 @@ impl ExprData {
     }
 
     pub fn assign(id: &str, expr: Expr) -> ExprData {
-        ExprData::Assign {
-            id: id.to_owned(),
-            expr,
-        }
+        ExprData::Assign { id: sym(id), expr }
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -520,16 +516,8 @@ mod parse_tests {
         let result = Program::parse(code).expect("Test code failed to parse");
         let desired_result = Program {
             classes: vec![
-                Class {
-                    name: "Apple".to_string(),
-                    parent: "Object".to_string(),
-                    features: vec![],
-                },
-                Class {
-                    name: "Orange".to_string(),
-                    parent: "Bananas".to_string(),
-                    features: vec![],
-                },
+                Class::class("Apple", "Object", vec![]),
+                Class::class("Orange", "Bananas", vec![]),
             ],
         };
         assert_eq!(result, desired_result);
@@ -541,11 +529,7 @@ mod parse_tests {
             a: T1;
         ";
         let result = Feature::parse(code).expect("Test code failed to parse");
-        let desired_result = Feature::Attr {
-            name: "a".to_string(),
-            typ: "T1".to_string(),
-            init: Expr::no_expr(),
-        };
+        let desired_result = Feature::attr("a", "T1", Expr::no_expr());
         assert_eq!(result, desired_result);
     }
 
@@ -555,11 +539,7 @@ mod parse_tests {
             b: T3 <- true;
         ";
         let result = Feature::parse(code).expect("Test code failed to parse");
-        let desired_result = Feature::Attr {
-            name: "b".to_string(),
-            typ: "T3".to_string(),
-            init: Expr::bool_const(true),
-        };
+        let desired_result = Feature::attr("b", "T3", Expr::bool_const(true));
         assert_eq!(result, desired_result);
     }
 
@@ -569,12 +549,7 @@ mod parse_tests {
             foo() : T2 {true};
         ";
         let result = Feature::parse(code).expect("Test code failed to parse");
-        let desired_result = Feature::Method {
-            name: "foo".to_string(),
-            formals: vec![],
-            typ: "T2".to_string(),
-            body: Expr::bool_const(true),
-        };
+        let desired_result = Feature::method("foo", vec![], "T2", Expr::bool_const(true));
         assert_eq!(result, desired_result);
     }
 
@@ -584,21 +559,12 @@ mod parse_tests {
             bar(c: S1, d: S2) : S3 {false};
         ";
         let result = Feature::parse(code).expect("Test code failed to parse");
-        let desired_result = Feature::Method {
-            name: "bar".to_string(),
-            formals: vec![
-                Formal {
-                    name: "c".to_string(),
-                    typ: "S1".to_string(),
-                },
-                Formal {
-                    name: "d".to_string(),
-                    typ: "S2".to_string(),
-                },
-            ],
-            typ: "S3".to_string(),
-            body: Expr::bool_const(false),
-        };
+        let desired_result = Feature::method(
+            "bar",
+            vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")],
+            "S3",
+            Expr::bool_const(false),
+        );
         assert_eq!(result, desired_result);
     }
 
@@ -711,16 +677,8 @@ mod parse_tests {
             esac
         ";
         let result = Expr::parse(code).expect("Test code failed to parse");
-        let dcase1 = Case {
-            id: "a".to_owned(),
-            typ: "T1".to_owned(),
-            expr: Expr::object("expr1"),
-        };
-        let dcase2 = Case {
-            id: "b".to_owned(),
-            typ: "T2".to_owned(),
-            expr: Expr::object("expr2"),
-        };
+        let dcase1 = Case::case("a", "T1", Expr::object("expr1"));
+        let dcase2 = Case::case("b", "T2", Expr::object("expr2"));
         let desired_result = Expr::typcase(Expr::object("bob"), vec![dcase1, dcase2]);
         assert_eq!(result, desired_result);
     }
