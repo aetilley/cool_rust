@@ -156,7 +156,7 @@ pub Expr3Ty: Expr = {
 
 pub Expr2Ty: Expr = {
   <slf: Expr1Ty> "@" <typ: "typeid"> "." <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::static_dispatch(slf, &typ, &method_name, exprs),
-  <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(Expr::no_expr(), &method_name, exprs),
+  <method_name: "objectid"> "(" <exprs: CommaSepExprsTy> ")" => Expr::dispatch(Expr::object("self"), &method_name, exprs),
   <e: Expr1Ty> => e,
 }
 

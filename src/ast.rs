@@ -679,7 +679,6 @@ mod parse_tests {
 
     #[test]
     fn test_static_dispatch() {
-        // TODO!
         let code: &str = r#"
         a@Apples.foo("hello", 42)
         "#;
@@ -729,7 +728,7 @@ mod parse_tests {
     #[test]
     fn test_let() {
         let code: &str = r#"
-            let bob: Int, carol: String <- "hello" in somebody
+            let bob: Int, carol: String <- "hello" in bob + y
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::r#let(
@@ -740,7 +739,7 @@ mod parse_tests {
                 "carol",
                 "String",
                 Expr::str_const("hello"),
-                Expr::object("somebody"),
+                Expr::plus(Expr::object("bob"), Expr::object("y")),
             ),
         );
         assert_eq!(result, desired_result);
@@ -976,7 +975,7 @@ mod parse_tests {
         "#;
         let result = Expr::parse(code).expect("Test code failed to parse");
         let desired_result = Expr::minus(
-            Expr::dispatch(Expr::no_expr(), "g", vec![]),
+            Expr::dispatch(Expr::object("self"), "g", vec![]),
             Expr::object("y"),
         );
         assert_eq!(result, desired_result);

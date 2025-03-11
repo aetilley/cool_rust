@@ -2,7 +2,7 @@ use std::collections::hash_map::HashMap;
 
 type Scope = HashMap<String, String>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Env {
     // Since `Vec::push` pushes to the back of the vector, we will
     // use the back as the "top" of the stack.
