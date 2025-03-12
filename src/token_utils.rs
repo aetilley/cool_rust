@@ -1,5 +1,9 @@
 use std::collections::BTreeMap;
 
+use crate::token::{LexicalError, Token};
+
+use lalrpop_util::ParseError;
+
 #[derive(Debug)]
 pub struct CommentError {
     pub msg: String,
@@ -128,22 +132,61 @@ pub fn strip_long_comments_and_get_insertion_map(
     Ok((text, insertion_map))
 }
 
+pub fn get_updated_location(loc: usize, insertion_map: &BTreeMap<usize, usize>) -> usize {
+    let loc_increase: usize = insertion_map
+        .iter()
+        .filter(|(k, _)| k <= &&loc)
+        .map(|(_, v)| v)
+        .sum();
+
+    loc + loc_increase
+}
+
 pub fn get_updated_span(
     (start, end): (usize, usize),
     insertion_map: &BTreeMap<usize, usize>,
 ) -> (usize, usize) {
-    let start_increase: usize = insertion_map
-        .iter()
-        .filter(|(k, _)| k <= &&start)
-        .map(|(_, v)| v)
-        .sum();
-    let end_increase: usize = insertion_map
-        .iter()
-        .filter(|(k, _)| k <= &&end)
-        .map(|(_, v)| v)
-        .sum();
+    let new_start = get_updated_location(start, insertion_map);
+    let new_end = get_updated_location(end, insertion_map);
 
-    (start + start_increase, end + end_increase)
+    (new_start, new_end)
+}
+
+pub fn adjust_location_in_parse_error(
+    err: &mut ParseError<usize, Token, LexicalError>,
+    insertion_map: &BTreeMap<usize, usize>,
+) {
+    match err {
+        ParseError::InvalidToken { location } => {
+            let new_loc = get_updated_location(*location, insertion_map);
+            *location = new_loc;
+        }
+        ParseError::UnrecognizedEof {
+            location,
+            expected: _,
+        } => {
+            let new_loc = get_updated_location(*location, insertion_map);
+            *location = new_loc;
+        }
+        ParseError::ExtraToken {
+            token: (loc1, _t, loc2),
+        } => {
+            let new_loc1 = get_updated_location(*loc1, insertion_map);
+            let new_loc2 = get_updated_location(*loc2, insertion_map);
+            *loc1 = new_loc1;
+            *loc2 = new_loc2;
+        }
+        ParseError::UnrecognizedToken {
+            token: (loc1, _t, loc2),
+            expected: _,
+        } => {
+            let new_loc1 = get_updated_location(*loc1, insertion_map);
+            let new_loc2 = get_updated_location(*loc2, insertion_map);
+            *loc1 = new_loc1;
+            *loc2 = new_loc2;
+        }
+        ParseError::User { error: _ } => {}
+    }
 }
 
 #[cfg(test)]

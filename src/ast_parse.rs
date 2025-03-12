@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use crate::ast::{Case, Class, Expr, ExprData, Feature, Program};
 use crate::cool_grammar::{ClassTyParser, ExprTyParser, FeatureTyParser, ProgramTyParser};
 use crate::token::{CoolLexer, LexicalError, Token};
-use crate::token_utils::{get_updated_span, strip_long_comments_and_get_insertion_map};
+use crate::token_utils::{
+    adjust_location_in_parse_error, get_updated_span, strip_long_comments_and_get_insertion_map,
+};
 
 use lalrpop_util::ParseError;
 
@@ -13,9 +15,16 @@ pub trait Parse: Sized {
     fn parse(code: &str) -> Result<Self, ParseError<usize, Token, LexicalError>> {
         let (stripped, insertion_map) = strip_long_comments_and_get_insertion_map(code).unwrap();
         let lexer = CoolLexer::new(&stripped);
-        let mut result = Self::inner_parser(lexer)?;
-        result.adjust_spans(&insertion_map);
-        Ok(result)
+        match Self::inner_parser(lexer) {
+            Ok(mut result) => {
+                result.adjust_spans(&insertion_map);
+                Ok(result)
+            }
+            Err(mut err) => {
+                adjust_location_in_parse_error(&mut err, &insertion_map);
+                Err(err)
+            }
+        }
     }
 
     fn adjust_spans(&mut self, insertion_map: &BTreeMap<usize, usize>);
