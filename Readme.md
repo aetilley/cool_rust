@@ -2,11 +2,9 @@ WIP!
 
 COOL Language manual:  https://theory.stanford.edu/~aiken/software/cool/cool-manual.pdf
 
-Status:  Semantic analysis almost complete.
+Status:  Semantic analysis complete.
 
 Next up:  LLVM backend
-
-Warts:  Currently errors reported do not come with a line or byte number.  We can attach the bytes to the Ast during parsing, but would prefer not to include this much data in test cases.  Will revisit soon.
 
 
 Usage:  
