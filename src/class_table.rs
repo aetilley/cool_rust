@@ -240,10 +240,11 @@ impl ClassTable {
         }
 
         let mut next = class_name;
-        while let Some(parent) = self.class_parent.get(&class_name) {
+        while let Some(parent) = self.class_parent.get(&next) {
+            next = *parent;
             match self.get_signature(next, method_name) {
                 Err(_) => {
-                    next = *parent;
+                    continue;
                 }
                 Ok(signature) => {
                     return Ok(signature);
@@ -324,7 +325,8 @@ impl ClassTable {
 mod class_table_tests {
 
     use super::*;
-    use crate::ast::{Parse, Program};
+    use crate::ast::Program;
+    use crate::ast_parse::Parse;
     use common_macros::hash_map;
 
     #[test]

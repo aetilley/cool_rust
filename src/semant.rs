@@ -74,8 +74,9 @@ impl Analyze for Feature {
 
                 if init.stype != "No_type" && ct.assert_subtype(init.stype, *typ, cls).is_err() {
                     let msg = format!(
-                        "In class {}, attribute {} type declared to be {}, but found {}",
-                        cls, name, typ, init.stype
+                        "Attribute {} type declared to be {}, \
+                        but found type {} for initializer at {:?} ",
+                        name, typ, init.stype, init.span
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -96,8 +97,8 @@ impl Analyze for Feature {
 
                 if ct.assert_subtype(body.stype, *typ, cls).is_err() {
                     let msg = format!(
-                        "In class {}, method {} type declared to be {}, but found {}",
-                        cls, name, typ, body.stype
+                        "Method {} type declared to be {}, but found type {} for body at {:?}",
+                        name, typ, body.stype, body.span
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -130,6 +131,8 @@ impl Analyze for Expr {
         cls: Sym,
     ) -> Result<(), SemanticAnalysisError> {
         // Set the `self.stype` field.
+        let span = self.span;
+
         let stype: Sym;
 
         match &mut *self.data {
@@ -144,12 +147,23 @@ impl Analyze for Expr {
                 } else {
                     slf.stype
                 };
+
                 let (params, mut return_type) =
                     ct.get_signature_dynamic(callee_type, *method_name)?;
                 if return_type == "SELF_TYPE" {
                     return_type = slf.stype;
                 }
-
+                if args.len() != params.len() {
+                    let msg = format!(
+                        "In call to method {} at {:?}, method has {} \
+                        parameters but received {} arguments.",
+                        method_name,
+                        span,
+                        params.len(),
+                        args.len()
+                    );
+                    return Err(SemanticAnalysisError { msg });
+                }
                 for (next_param, arg) in args.iter_mut().enumerate() {
                     arg.analyze(ct, env, cls)?;
                     if ct
@@ -157,8 +171,8 @@ impl Analyze for Expr {
                         .is_err()
                     {
                         let msg = format!(
-                            "In class {}, method {} parameter {} is of type  {}, but was passed an argument of type {}",
-                            cls, method_name, params[next_param].name, params[next_param].typ, arg.stype
+                            "In call to method {} at {:?}, parameter {} is of type  {}, but was passed an argument of type {}",
+                            method_name, span, params[next_param].name, params[next_param].typ, arg.stype
                         );
                         return Err(SemanticAnalysisError { msg });
                     }
@@ -175,9 +189,9 @@ impl Analyze for Expr {
                 slf.analyze(ct, env, cls)?;
                 if ct.assert_subtype(slf.stype, *typ, cls).is_err() {
                     let msg = format!(
-                        "In class {}, method {} static dispatch type declared to be {}, \
-                        but found self expression of non-subtype type {}",
-                        cls, method_name, typ, slf.stype
+                        "In call to {} at {:?}, static dispatch type declared to be {}, \
+                        but found self expression of non sub-type {}",
+                        method_name, span, typ, slf.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -194,13 +208,8 @@ impl Analyze for Expr {
                         .is_err()
                     {
                         let msg = format!(
-                            "In class {}, method {} argument {} type declared to be {}, 
-                            but found {}",
-                            cls,
-                            method_name,
-                            params[next_param].name,
-                            params[next_param].typ,
-                            arg.stype
+                            "In call to method {} at {:?}, parameter {} is of type  {}, but was passed an argument of type {}",
+                            method_name, span, params[next_param].name, params[next_param].typ, arg.stype
                         );
                         return Err(SemanticAnalysisError { msg });
                     }
@@ -213,8 +222,9 @@ impl Analyze for Expr {
                 let mut iter = cases.iter_mut();
                 let mut lub = match iter.next() {
                     None => panic!(
-                        "Got a typecase expression with no branches.
-                    This should not happen."
+                        "{:?}:  Got a typecase expression with no branches.
+                    This should not happen.",
+                        span
                     ),
                     Some(branch) => {
                         branch.expr.analyze(ct, env, cls)?;
@@ -239,9 +249,9 @@ impl Analyze for Expr {
                 if init.stype != sym("No_type") && ct.assert_subtype(init.stype, *typ, cls).is_err()
                 {
                     let msg = format!(
-                        "In class {}, let variable declared to be {}, 
-                        but found initializer of non-subtype type {}",
-                        cls, typ, init.stype
+                        "Let binding variable at {:?} declared to be of type {}, 
+                        but found initializer of non sub-type {}",
+                        span, typ, init.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -261,8 +271,8 @@ impl Analyze for Expr {
                 pred.analyze(ct, env, cls)?;
                 if pred.stype != sym("Bool") {
                     let msg = format!(
-                        "In class {}, while-loop predicate was of non-Bool type {}",
-                        cls, pred.stype
+                        "While-loop predicate at {:?} is of non-Bool type {}",
+                        span, pred.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -278,8 +288,8 @@ impl Analyze for Expr {
                 pred.analyze(ct, env, cls)?;
                 if pred.stype != sym("Bool") {
                     let msg = format!(
-                        "In class {}, conditional predicate was of non-Bool type {}",
-                        cls, pred.stype
+                        "Conditional predicate at {:?} is of non-Bool type {}",
+                        span, pred.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -298,8 +308,9 @@ impl Analyze for Expr {
                     }
                     None => {
                         panic!(
-                            "Empty block expression.  
-                            This should have been caught by the parser."
+                            "Empty block expression at {:?}
+                            This should have been caught by the parser.",
+                            span
                         )
                     }
                 }
@@ -309,15 +320,16 @@ impl Analyze for Expr {
                 expr.analyze(ct, env, cls)?;
                 match env.lookup(*id) {
                     None => {
-                        let msg = format!("No object named \"{}\" found in scope.", id);
+                        let msg =
+                            format!("At {:?}: No object named \"{}\" found in scope.", span, id);
                         return Err(SemanticAnalysisError { msg });
                     }
                     Some(var_type) => {
                         if ct.assert_subtype(expr.stype, var_type, cls).is_err() {
                             let msg = format!(
-                                "In class {}, assignment variable previously declared to 
-                                be of type {}, but assigned to non-subtype {}",
-                                cls, var_type, expr.stype
+                                "Assignment at {:?} to variable {} previously declared to 
+                                be of type {}, but assigned to non sub-type {}",
+                                span, id, var_type, expr.stype
                             );
                             return Err(SemanticAnalysisError { msg });
                         }
@@ -341,8 +353,8 @@ impl Analyze for Expr {
                 expr.analyze(ct, env, cls)?;
                 if expr.stype != sym("Bool") {
                     let msg = format!(
-                        "In class {}, isvoid arg was of non-Bool type {}",
-                        cls, expr.stype
+                        "Argument to isvoid at {:?} was of non-Bool type {}",
+                        span, expr.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -355,8 +367,8 @@ impl Analyze for Expr {
                 expr.analyze(ct, env, cls)?;
                 if expr.stype != sym("Bool") {
                     let msg = format!(
-                        "In class {}, not arg was of non-Bool type {}",
-                        cls, expr.stype
+                        "Argument to not at {:?} was of non-Bool type {}",
+                        span, expr.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -366,8 +378,8 @@ impl Analyze for Expr {
                 expr.analyze(ct, env, cls)?;
                 if expr.stype != sym("Int") {
                     let msg = format!(
-                        "In class {}, comp arg was of non-Int type {}",
-                        cls, expr.stype
+                        "Argument to ~ at {:?} was of non-Int type {}",
+                        span, expr.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -377,16 +389,16 @@ impl Analyze for Expr {
                 lhs.analyze(ct, env, cls)?;
                 if lhs.stype != sym("Int") {
                     let msg = format!(
-                        "In class {}, operator lhs was of non-Int type {}",
-                        cls, lhs.stype
+                        "Left-hand side of operator at {:?} was of non-Int type {}",
+                        span, lhs.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
                 rhs.analyze(ct, env, cls)?;
                 if rhs.stype != sym("Int") {
                     let msg = format!(
-                        "In class {}, operator rhs was of non-Int type {}",
-                        cls, rhs.stype
+                        "Right-hand side of operator at {:?} was of non-Int type {}",
+                        span, rhs.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -412,8 +424,8 @@ impl Analyze for Expr {
                 }
                 if comp_as_type != sym("Object") && lhs.stype != rhs.stype {
                     let msg = format!(
-                        "In class {}, equality operands had incompatible types lhs: {} and rhs: {}.",
-                        cls, lhs.stype, rhs.stype
+                        "Equality operands at {:?} had incompatible types lhs: {} and rhs: {}.",
+                        span, lhs.stype, rhs.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -428,16 +440,16 @@ impl Analyze for Expr {
                 lhs.analyze(ct, env, cls)?;
                 if lhs.stype != sym("Int") {
                     let msg = format!(
-                        "In class {}, operator lhs was of non-Int type {}",
-                        cls, lhs.stype
+                        "Left-hand side of operator at {:?} was of non-Int type {}",
+                        span, lhs.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
                 rhs.analyze(ct, env, cls)?;
                 if rhs.stype != sym("Int") {
                     let msg = format!(
-                        "In class {}, operator rhs was of non-Int type {}",
-                        cls, rhs.stype
+                        "Right-hand side of operator at {:?} was of non-Int type {}",
+                        span, rhs.stype
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
@@ -445,7 +457,7 @@ impl Analyze for Expr {
             }
             ExprData::Object { id } => match env.lookup(*id) {
                 None => {
-                    let msg = format!("No object named \"{}\" found in scope.", id);
+                    let msg = format!("At {:?}: No object named \"{}\" found in scope.", span, id);
                     return Err(SemanticAnalysisError { msg });
                 }
                 Some(value) => stype = value,
@@ -460,7 +472,7 @@ impl Analyze for Expr {
 mod semant_tests {
 
     use super::*;
-    use crate::ast::Parse;
+    use crate::ast_parse::Parse;
 
     #[test]
     fn test_semant_simple_program() {
@@ -969,5 +981,18 @@ mod semant_tests {
         let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
         assert_eq!(result, Ok(()));
         assert_eq!(e1.stype, sym("Int"));
+    }
+
+    #[test]
+    fn test_semant_problematic() {
+        let code: &str = r#"
+        class B {
+        x: B;
+        bar() : B {x.foo()};
+        };
+        "#;
+        let mut program = Program::parse(code).expect("Test code failed to parse");
+        let result = program.semant();
+        assert!(result.is_err());
     }
 }

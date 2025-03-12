@@ -94,18 +94,15 @@ pub FeaturesTy: Features = {
 }
 
 pub ExprTy: Expr = {
-  <e: Expr10Ty> => e,
+<start:@L>  <mut e: Expr10Ty> <end: @R> => {
+  e.span = (start, end); 
+  e
+}
 }
 
 pub Expr10Ty: Expr = {
-  "{" <exprs: ExprsWithSemicolonsTy> "}" => Expr::block(exprs),
-  "new" <typ: "typeid"> => Expr::new(&typ),
-  "while" <cond: ExprTy> "loop" <body: ExprTy> "pool" => Expr::r#loop(cond, body),
-  "case" <expr: ExprTy> "of" <cases: CasesTy> "esac" => Expr::typcase(expr, cases),
   "let" <let_bindings: LetBindingsTy> "in" <body: ExprTy> => LetBinding::unwrap_let_bindings(let_bindings, body),
-  
-  "if" <pred: ExprTy> "then" <then_expr: ExprTy> "else" <else_expr: ExprTy> "fi" => Expr::cond(pred, then_expr, else_expr),
-  <e: Expr9Ty> => e,
+    <e: Expr9Ty> => e,
 }
 
   
@@ -167,6 +164,11 @@ pub Expr1Ty: Expr = {
 }
 
 pub Expr0Ty: Expr = {
+  "{" <exprs: ExprsWithSemicolonsTy> "}" => Expr::block(exprs),
+  "new" <typ: "typeid"> => Expr::new(&typ),
+  "while" <cond: ExprTy> "loop" <body: ExprTy> "pool" => Expr::r#loop(cond, body),
+  "case" <expr: ExprTy> "of" <cases: CasesTy> "esac" => Expr::typcase(expr, cases),
+  "if" <pred: ExprTy> "then" <then_expr: ExprTy> "else" <else_expr: ExprTy> "fi" => Expr::cond(pred, then_expr, else_expr),
   <name: "objectid"> => Expr::object(&name),
   <value: "int_const"> => Expr::int_const(&value),
   <maybe_value: "str_const"> => Expr::str_const(&maybe_value.unwrap()),

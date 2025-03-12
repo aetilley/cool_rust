@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use cool_rust::ast::Parse;
 use cool_rust::ast::Program;
+use cool_rust::ast_parse::Parse;
 
 fn main() {
     let user_args: Vec<String> = env::args().collect();
