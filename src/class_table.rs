@@ -5,21 +5,22 @@ use crate::ast::Expr;
 use crate::ast::{Class, Classes, Feature, Formal, Formals};
 use crate::semant::SemanticAnalysisError;
 
+use crate::symbol::{sym, Sym};
+
 use common_macros::hash_set;
 
-type ClassParentTy = HashMap<String, String>;
-type ClassChildrenTy = HashMap<String, HashSet<String>>;
-type ClassMethodParamTypesTy = HashMap<String, HashMap<String, Formals>>;
-type ClassMethodReturnTypeTy = HashMap<String, HashMap<String, String>>;
+type ClassParentTy = HashMap<Sym, Sym>;
+type ClassChildrenTy = HashMap<Sym, HashSet<Sym>>;
+type Signature = (Formals, Sym);
+type ClassMethodSignatureTy = HashMap<Sym, HashMap<Sym, Signature>>;
 
 #[derive(Debug, PartialEq)]
 pub struct ClassTable {
-    native_classes: HashSet<String>,
-    classes: HashSet<String>,
+    native_classes: HashSet<Sym>,
+    classes: HashSet<Sym>,
     class_parent: ClassParentTy,
     class_children: ClassChildrenTy,
-    class_method_param_types: ClassMethodParamTypesTy,
-    class_method_return_type: ClassMethodReturnTypeTy,
+    class_method_signature: ClassMethodSignatureTy,
 }
 
 impl ClassTable {
@@ -30,7 +31,7 @@ impl ClassTable {
         // Object
         let object_features = vec![
             Feature::method("abort", vec![], "Object", Expr::no_expr()),
-            Feature::method("type_name", vec![], "Str", Expr::no_expr()),
+            Feature::method("type_name", vec![], "String", Expr::no_expr()),
             Feature::method("copy", vec![], "SELF_TYPE", Expr::no_expr()),
         ];
         let object_class = Class::class("Object", "No_class", object_features);
@@ -40,7 +41,7 @@ impl ClassTable {
         let io_features = vec![
             Feature::method(
                 "out_string",
-                vec![Formal::formal("arg", "Str")],
+                vec![Formal::formal("arg", "String")],
                 "SELF_TYPE",
                 Expr::no_expr(),
             ),
@@ -50,7 +51,7 @@ impl ClassTable {
                 "SELF_TYPE",
                 Expr::no_expr(),
             ),
-            Feature::method("in_string", vec![], "Str", Expr::no_expr()),
+            Feature::method("in_string", vec![], "String", Expr::no_expr()),
             Feature::method("in_int", vec![], "Int", Expr::no_expr()),
         ];
         let io_class = Class::class("IO", "Object", io_features);
@@ -73,29 +74,29 @@ impl ClassTable {
             Feature::method("length", vec![], "Int", Expr::no_expr()),
             Feature::method(
                 "concat",
-                vec![Formal::formal("arg", "Str")],
-                "Str",
+                vec![Formal::formal("arg", "String")],
+                "String",
                 Expr::no_expr(),
             ),
             Feature::method(
                 "substr",
                 vec![Formal::formal("arg", "Int"), Formal::formal("arg2", "Int")],
-                "Str",
+                "String",
                 Expr::no_expr(),
             ),
         ];
-        let str_class = Class::class("Str", "Object", str_features);
+        let str_class = Class::class("String", "Object", str_features);
         native_classes.push(str_class);
 
         native_classes
     }
 
     fn _mark_descendants(
-        node: &str,
-        visited: &mut HashSet<String>,
+        node: Sym,
+        visited: &mut HashSet<Sym>,
         class_children: &ClassChildrenTy,
     ) -> Result<(), SemanticAnalysisError> {
-        match class_children.get(node) {
+        match class_children.get(&node) {
             None => Ok(()),
             Some(children) => {
                 for child in children.iter() {
@@ -106,8 +107,8 @@ impl ClassTable {
                         );
                         return Err(SemanticAnalysisError { msg });
                     }
-                    visited.insert(child.to_owned());
-                    ClassTable::_mark_descendants(child, visited, class_children)?;
+                    visited.insert(*child);
+                    ClassTable::_mark_descendants(*child, visited, class_children)?;
                 }
                 Ok(())
             }
@@ -115,15 +116,15 @@ impl ClassTable {
     }
 
     fn detect_cycles(class_children: &ClassChildrenTy) -> Result<(), SemanticAnalysisError> {
-        let root = "Object";
-        let mut visited = HashSet::<String>::new();
-        visited.insert(root.to_owned());
+        let root = sym("Object");
+        let mut visited = HashSet::<Sym>::new();
+        visited.insert(root);
         ClassTable::_mark_descendants(root, &mut visited, class_children)
             .expect("We really should not be getting loops involving Object");
         let mut detached_classes = hash_set! {};
         for key in class_children.keys() {
-            if !visited.contains::<String>(key) {
-                detached_classes.insert(key.clone());
+            if !visited.contains::<Sym>(key) {
+                detached_classes.insert(*key);
             }
         }
         if !detached_classes.is_empty() {
@@ -139,26 +140,22 @@ impl ClassTable {
 
     fn register_methods_and_relatives(
         class: &Class,
-        class_method_param_types: &mut ClassMethodParamTypesTy,
-        class_method_return_type: &mut ClassMethodReturnTypeTy,
+        class_method_signature: &mut ClassMethodSignatureTy,
         class_parent: &mut ClassParentTy,
         class_children: &mut ClassChildrenTy,
     ) {
         if class.parent != "No_class" {
-            class_parent.insert(class.name.clone(), class.parent.clone());
+            class_parent.insert(class.name, class.parent);
             class_children
-                .entry(class.parent.clone())
+                .entry(class.parent)
                 .and_modify(|children| {
-                    children.insert(class.name.clone());
+                    children.insert(class.name);
                 })
-                .or_insert(hash_set! {class.name.clone()});
-            class_children
-                .entry(class.name.clone())
-                .or_insert(hash_set! {});
+                .or_insert(hash_set! {class.name});
+            class_children.entry(class.name).or_insert(hash_set! {});
         }
 
-        let mut method_param_types = HashMap::<String, Formals>::new();
-        let mut method_return_type = HashMap::<String, String>::new();
+        let mut method_signature = HashMap::<Sym, Signature>::new();
 
         for feature in class.features.iter() {
             if let Feature::Method {
@@ -168,27 +165,23 @@ impl ClassTable {
                 body: _,
             } = feature
             {
-                method_param_types.insert(name.clone(), formals.clone());
-                method_return_type.insert(name.clone(), typ.clone());
+                method_signature.insert(*name, (formals.clone(), *typ));
             }
         }
 
-        class_method_param_types.insert(class.name.clone(), method_param_types);
-        class_method_return_type.insert(class.name.clone(), method_return_type);
+        class_method_signature.insert(class.name, method_signature);
     }
 
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
-        let mut class_parent = HashMap::<String, String>::new();
-        let mut class_children = HashMap::<String, HashSet<String>>::new();
-        let mut class_method_param_types = HashMap::<String, HashMap<String, Formals>>::new();
-        let mut class_method_return_type = HashMap::<String, HashMap<String, String>>::new();
+        let mut class_parent = HashMap::<Sym, Sym>::new();
+        let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
+        let mut class_method_signature = HashMap::<Sym, HashMap<Sym, Signature>>::new();
 
         let native_classes = ClassTable::create_native_classes();
         for class in native_classes.iter() {
             ClassTable::register_methods_and_relatives(
                 class,
-                &mut class_method_param_types,
-                &mut class_method_return_type,
+                &mut class_method_signature,
                 &mut class_parent,
                 &mut class_children,
             );
@@ -197,8 +190,7 @@ impl ClassTable {
         for class in classes.iter() {
             ClassTable::register_methods_and_relatives(
                 class,
-                &mut class_method_param_types,
-                &mut class_method_return_type,
+                &mut class_method_signature,
                 &mut class_parent,
                 &mut class_children,
             );
@@ -207,101 +199,65 @@ impl ClassTable {
         ClassTable::detect_cycles(&class_children)?;
 
         //let native_class_names = native_classes.map
-        let class_names = classes.iter().map(|cls| cls.name.clone()).collect();
-        let native_class_names = native_classes.iter().map(|cls| cls.name.clone()).collect();
+        let class_names = classes.iter().map(|cls| cls.name).collect();
+        let native_class_names = native_classes.iter().map(|cls| cls.name).collect();
         Ok(ClassTable {
             native_classes: native_class_names,
             classes: class_names,
             class_parent,
             class_children,
-            class_method_param_types,
-            class_method_return_type,
+            class_method_signature,
         })
     }
 
-    pub fn get_param_types(
+    pub fn get_signature(
         &self,
-        class_name: &str,
-        method_name: &str,
-    ) -> Result<Formals, SemanticAnalysisError> {
-        match self.class_method_param_types.get(class_name) {
+        class_name: Sym,
+        method_name: Sym,
+    ) -> Result<Signature, SemanticAnalysisError> {
+        match self.class_method_signature.get(&class_name) {
             None => {
                 let msg = format!("No methods found for class {}.", class_name);
                 Err(SemanticAnalysisError { msg })
             }
-            Some(methods) => match methods.get(method_name) {
+            Some(methods) => match methods.get(&method_name) {
                 None => {
                     let msg = format!("No method {} found for class {}.", method_name, class_name);
                     Err(SemanticAnalysisError { msg })
                 }
-                Some(params) => Ok(params.clone()),
+                Some(sig) => Ok(sig.clone()),
             },
         }
     }
 
-    pub fn get_param_types_dynamic(
+    pub fn get_signature_dynamic(
         &self,
-        class_name: &str,
-        method_name: &str,
-    ) -> Result<Formals, SemanticAnalysisError> {
-        
-        if let Ok(params) = self.get_param_types(class_name, method_name) {
-            return Ok(params);
+        class_name: Sym,
+        method_name: Sym,
+    ) -> Result<Signature, SemanticAnalysisError> {
+        if let Ok(signature) = self.get_signature(class_name, method_name) {
+            return Ok(signature);
         }
 
         let mut next = class_name;
-        while let Some(parent) = self.class_parent.get(class_name) {
-            match self.get_param_types(next, method_name) {
-                Err(_) => {next = parent;},
-                Ok(params) => {return Ok(params);},
-            }
-        }
-        let msg = format!("No method {} found for class {} or for any ancestor.", method_name, class_name);
-        Err(SemanticAnalysisError{msg})
-    }
-
-    pub fn get_return_type(
-        &self,
-        class_name: &str,
-        method_name: &str,
-    ) -> Result<String, SemanticAnalysisError> {
-        match self.class_method_return_type.get(class_name) {
-            None => {
-                let msg = format!("No methods found for class {}.", class_name);
-                Err(SemanticAnalysisError { msg })
-            }
-            Some(methods) => match methods.get(method_name) {
-                None => {
-                    let msg = format!("No method {} found for class {}.", method_name, class_name);
-                    Err(SemanticAnalysisError { msg })
+        while let Some(parent) = self.class_parent.get(&class_name) {
+            match self.get_signature(next, method_name) {
+                Err(_) => {
+                    next = *parent;
                 }
-                Some(return_type) => Ok(return_type.clone()),
-            },
-        }
-    }
-
-    pub fn get_return_type_dynamic(
-        &self,
-        class_name: &str,
-        method_name: &str,
-    ) -> Result<String, SemanticAnalysisError> {
-        
-        if let Ok(typ) = self.get_return_type(class_name, method_name) {
-            return Ok(typ);
-        }
-
-        let mut next = class_name;
-        while let Some(parent) = self.class_parent.get(class_name) {
-            match self.get_return_type(next, method_name) {
-                Err(_) => {next = parent;},
-                Ok(typ) => {return Ok(typ);},
+                Ok(signature) => {
+                    return Ok(signature);
+                }
             }
         }
-        let msg = format!("No method {} found for class {} or for any ancestor.", method_name, class_name);
-        Err(SemanticAnalysisError{msg})
+        let msg = format!(
+            "No method {} found for class {} or for any ancestor.",
+            method_name, class_name
+        );
+        Err(SemanticAnalysisError { msg })
     }
 
-    pub fn get_lub(&self, t1: &str, t2: &str) -> String {
+    pub fn get_lub(&self, t1: Sym, t2: Sym) -> Sym {
         // In order to comput the least upper bound of two types, we
         // comput the two ancestries to the root "Object" and then
         // read them both backwards to find the first place they diverge.
@@ -309,49 +265,57 @@ impl ClassTable {
         let mut ancestry1 = vec![t1];
         let mut ancestry2 = vec![t2];
         let mut next = t1;
-        while let Some(parent) = self.class_parent.get(next) {
-            ancestry1.push(parent);
-            next = parent;
+        while let Some(parent) = self.class_parent.get(&next) {
+            ancestry1.push(*parent);
+            next = *parent;
         }
         let mut next = t2;
-        while let Some(parent) = self.class_parent.get(next) {
-            ancestry2.push(parent);
-            next = parent;
+        while let Some(parent) = self.class_parent.get(&next) {
+            ancestry2.push(*parent);
+            next = *parent;
         }
         let mut rev_pairs = ancestry1.into_iter().rev().zip(ancestry2.into_iter().rev());
         let (e1, e2) = rev_pairs.next().unwrap();
-        if e1 != e2 || e1 != "Object" {
-            panic!("Ancestries somehow doen't both start at type Object");
+
+        if e1 != "Object" {
+            panic!("Ancestry of type {} doesn't begin at type Object", t1);
+        }
+        if e2 != "Object" {
+            panic!("Ancestry of type {} doesn't begin at type Object", t2);
         }
         let mut lub = e1;
         for (e1, e2) in rev_pairs {
             if e1 != e2 {
-                return lub.to_owned();
+                return lub;
             }
             lub = e1
         }
-        lub.to_owned()
+        lub
     }
 
-    pub fn assert_subtype(&self, t1: &str, t2: &str) -> Result<(), SemanticAnalysisError> {
+    pub fn assert_subtype(&self, t1: Sym, t2: Sym, cls: Sym) -> Result<(), SemanticAnalysisError> {
         // If this function gets called on "No_type" almost certainly something has
         // gone wrong.
-        assert_ne!(t1, "No_type");
-        assert_ne!(t2, "No_type");
+        // Note that the class is passed in just in case either of the arguments is SELF_TYPE.
+        assert_ne!(t1, sym("No_type"));
+        assert_ne!(t2, sym("No_type"));
 
-        if t1 == t2 {
+        let s1 = if t1 == sym("SELF_TYPE") { cls } else { t1 };
+        let s2 = if t2 == sym("SELF_TYPE") { cls } else { t2 };
+
+        if s1 == s2 {
             return Ok(());
         }
 
-        let mut next = t1;
-        while let Some(parent) = self.class_parent.get(next) {
-            if parent == t2 {
+        let mut next = s1;
+        while let Some(parent) = self.class_parent.get(&next) {
+            if parent == &s2 {
                 return Ok(());
             };
-            next = parent;
+            next = *parent;
         }
 
-        let msg = format!("Type {} is not a subtype of type {}", t1, t2);
+        let msg = format!("Type {} is not a subtype of type {}", s1, s2);
         Err(SemanticAnalysisError { msg })
     }
 }
@@ -366,21 +330,33 @@ mod class_table_tests {
     #[test]
     fn test_assert_subtype() {
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = "Int";
-        let t2 = "Int";
-        let result = ct.assert_subtype(t1, t2);
+        let t1 = sym("Int");
+        let t2 = sym("Int");
+        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = "Int";
-        let t2 = "Object";
-        let result = ct.assert_subtype(t1, t2);
+        let t1 = sym("Int");
+        let t2 = sym("Object");
+        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = "Object";
-        let t2 = "Int";
-        let result = ct.assert_subtype(t1, t2);
+        let t1 = sym("Object");
+        let t2 = sym("Int");
+        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
+        assert!(result.is_err());
+
+        let ct = ClassTable::new(&vec![]).unwrap();
+        let t1 = sym("SELF_TYPE");
+        let t2 = sym("Orange");
+        let result = ct.assert_subtype(t1, t2, sym("Orange"));
+        assert_eq!(result, Ok(()));
+
+        let ct = ClassTable::new(&vec![]).unwrap();
+        let t1 = sym("SELF_TYPE");
+        let t2 = sym("Int");
+        let result = ct.assert_subtype(t1, t2, sym("Orange"));
         assert!(result.is_err());
     }
 
@@ -398,95 +374,68 @@ mod class_table_tests {
         let result = ClassTable::new(&program.classes).unwrap();
 
         let desired_classes = hash_set! {
-            "Apple".to_owned(),
-            "Orange".to_owned(),
+            sym("Apple"),
+            sym("Orange"),
         };
 
         let desired_native_classes = hash_set! {
-            "Int".to_owned(),
-            "IO".to_owned(),
-            "Bool".to_owned(),
-            "Str".to_owned(),
-            "Object".to_owned(),
+            sym("Int"),
+            sym("IO"),
+            sym("Bool"),
+            sym("String"),
+            sym("Object"),
         };
 
         let desired_class_parent = hash_map! {
-            "Int".to_owned()=>"Object".to_owned(),
-            "IO".to_owned()=>"Object".to_owned(),
-            "Bool".to_owned()=>"Object".to_owned(),
-            "Str".to_owned()=>"Object".to_owned(),
-            "Apple".to_owned()=>"Object".to_owned(),
-            "Orange".to_owned()=>"Apple".to_owned(),
+            sym("Int")=>sym("Object"),
+            sym("IO")=>sym("Object"),
+            sym("Bool")=>sym("Object"),
+            sym("String")=>sym("Object"),
+            sym("Apple")=>sym("Object"),
+            sym("Orange")=>sym("Apple"),
         };
 
         let desired_class_children = hash_map! {
-            "Object".to_owned() => hash_set!{
-                "IO".to_owned(),
-                "Str".to_owned(),
-                "Bool".to_owned(),
-                "Int".to_owned(),
-                "Apple".to_owned(),
+            sym("Object") => hash_set!{
+                sym("IO"),
+                sym("String"),
+                sym("Bool"),
+                sym("Int"),
+                sym("Apple"),
             },
-            "Apple".to_owned() => hash_set!{
-                "Orange".to_owned(),
+            sym("Apple") => hash_set!{
+                sym("Orange"),
             },
-            "Bool".to_owned() => hash_set!{},
-            "Int".to_owned() => hash_set!{},
-            "Str".to_owned() => hash_set!{},
-            "IO".to_owned() => hash_set!{},
-            "Orange".to_owned() => hash_set!{},
+            sym("Bool") => hash_set!{},
+            sym("Int") => hash_set!{},
+            sym("String") => hash_set!{},
+            sym("IO") => hash_set!{},
+            sym("Orange") => hash_set!{},
         };
-        let desired_class_method_param_types = hash_map! {
-            "Object".to_owned() => hash_map!{
-                "abort".to_owned() => vec![],
-                "type_name".to_owned() => vec![],
-                "copy".to_owned() => vec![],
+        let desired_class_method_signature = hash_map! {
+            sym("Object") => hash_map!{
+                sym("abort") => (vec![], sym("Object")),
+                sym("type_name") => (vec![], sym("String")),
+                sym("copy") => (vec![], sym("SELF_TYPE")),
             },
-            "IO".to_owned() => hash_map!{
-                "out_string".to_owned() => vec![Formal::formal("arg", "Str")],
-                "out_int".to_owned() => vec![Formal::formal("arg", "Int")],
-                "in_string".to_owned() => vec![],
-                "in_int".to_owned() => vec![],
+            sym("IO") => hash_map!{
+                sym("out_string") => (vec![Formal::formal("arg", "String")], sym("SELF_TYPE")),
+                sym("out_int") => (vec![Formal::formal("arg", "Int")], sym("SELF_TYPE")),
+                sym("in_string") => (vec![], sym("String")),
+                sym("in_int") => (vec![], sym("Int")),
             },
-            "Str".to_owned() => hash_map!{
-                "length".to_owned() => vec![],
-                "concat".to_owned() => vec![Formal::formal("arg", "Str")],
-                "substr".to_owned() => vec![Formal::formal("arg", "Int"), Formal::formal("arg2", "Int")],
+            sym("String") => hash_map!{
+                sym("length") => (vec![], sym("Int")),
+                sym("concat") => (vec![Formal::formal("arg", "String")], sym("String")),
+                sym("substr") => (vec![Formal::formal("arg", "Int"), Formal::formal("arg2", "Int")], sym("String")),
             },
-            "Bool".to_owned() => hash_map!{},
-            "Int".to_owned() => hash_map!{},
+            sym("Bool") => hash_map!{},
+            sym("Int") => hash_map!{},
 
-            "Apple".to_owned() => hash_map!{},
-            "Orange".to_owned() => hash_map!{
-                "foo".to_owned() => vec![],
-                "bar".to_owned() => vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")],
-            },
-        };
-
-        let desired_class_method_return_types = hash_map! {
-            "Object".to_owned() => hash_map!{
-                "abort".to_owned() => "Object".to_owned(),
-                "type_name".to_owned() => "Str".to_owned(),
-                "copy".to_owned() => "SELF_TYPE".to_owned(),
-            },
-            "IO".to_owned() => hash_map!{
-                "out_string".to_owned() => "SELF_TYPE".to_owned(),
-                "out_int".to_owned() => "SELF_TYPE".to_owned(),
-                "in_string".to_owned() => "Str".to_owned(),
-                "in_int".to_owned() => "Int".to_owned(),
-            },
-            "Str".to_owned() => hash_map!{
-                "length".to_owned() => "Int".to_owned(),
-                "concat".to_owned() => "Str".to_owned(),
-                "substr".to_owned() => "Str".to_owned(),
-            },
-            "Bool".to_owned() => hash_map!{},
-            "Int".to_owned() => hash_map!{},
-
-            "Apple".to_owned() => hash_map!{},
-            "Orange".to_owned() => hash_map!{
-                "foo".to_owned() => "T2".to_owned(),
-                "bar".to_owned() => "S3".to_owned(),
+            sym("Apple") => hash_map!{},
+            sym("Orange") => hash_map!{
+                sym("foo") => (vec![], sym("T2")),
+                sym("bar") => (vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")], sym("S3")),
             },
         };
 
@@ -495,12 +444,8 @@ mod class_table_tests {
         assert_eq!(result.class_parent, desired_class_parent);
         assert_eq!(result.class_children, desired_class_children);
         assert_eq!(
-            result.class_method_param_types,
-            desired_class_method_param_types
-        );
-        assert_eq!(
-            result.class_method_return_type,
-            desired_class_method_return_types
+            result.class_method_signature,
+            desired_class_method_signature
         );
     }
 
@@ -529,7 +474,7 @@ mod class_table_tests {
         ";
         let program = Program::parse(code).unwrap();
         let ct = ClassTable::new(&program.classes).unwrap();
-        let result = ct.get_lub("Kiwi", "Grape");
-        assert_eq!(result, "Orange");
+        let result = ct.get_lub(sym("Kiwi"), sym("Grape"));
+        assert_eq!(result, sym("Orange"));
     }
 }
