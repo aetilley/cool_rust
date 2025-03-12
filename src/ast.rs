@@ -3,11 +3,10 @@
 use std::fmt::Debug;
 
 use crate::cool_grammar::{ClassTyParser, ExprTyParser, FeatureTyParser, ProgramTyParser};
+use crate::symbol::{sym, Sym};
 use crate::token::{strip_long_comments, CoolLexer, LexicalError, Token};
-use crate::symbol::{Sym, sym};
 
 use lalrpop_util::ParseError;
-
 
 pub fn add_one<T: Clone>(some: &Vec<T>, one: &T) -> Vec<T> {
     // Takes ownership
@@ -264,15 +263,20 @@ pub enum ExprData {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Expr {
     pub data: Box<ExprData>,
+    // The static type, to be determined during semantic analysis.
     pub stype: Sym,
+    // The byte range of the Expr in the source code.
+    pub range: (usize, usize),
 }
 pub type Exprs = Vec<Expr>;
 impl Expr {
     pub fn from(data: ExprData) -> Self {
         let stype = sym("No_type");
+        let range = (0, 0);
         Expr {
             data: Box::new(data),
             stype,
+            range,
         }
     }
 }

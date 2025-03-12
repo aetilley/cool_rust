@@ -41,7 +41,7 @@ impl Class {
     pub fn semant(&mut self, ct: &ClassTable, env: &mut Env) -> Result<(), SemanticAnalysisError> {
         env.enter_scope();
 
-        env.add_binding(sym("self"), self.name);
+        env.add_binding(sym("self"), sym("SELF_TYPE"));
 
         for feature in self.features.iter_mut() {
             feature.analyze(ct, env, self.name)?;
@@ -72,7 +72,7 @@ impl Analyze for Feature {
             Feature::Attr { name, typ, init } => {
                 init.analyze(ct, env, cls)?;
 
-                if init.stype != "No_type" && ct.assert_subtype(init.stype, *typ).is_err() {
+                if init.stype != "No_type" && ct.assert_subtype(init.stype, *typ, cls).is_err() {
                     let msg = format!(
                         "In class {}, attribute {} type declared to be {}, but found {}",
                         cls, name, typ, init.stype
@@ -94,7 +94,7 @@ impl Analyze for Feature {
                 body.analyze(ct, env, cls)?;
                 env.exit_scope();
 
-                if ct.assert_subtype(body.stype, *typ).is_err() {
+                if ct.assert_subtype(body.stype, *typ, cls).is_err() {
                     let msg = format!(
                         "In class {}, method {} type declared to be {}, but found {}",
                         cls, name, typ, body.stype
@@ -139,16 +139,21 @@ impl Analyze for Expr {
                 args,
             } => {
                 slf.analyze(ct, env, cls)?;
-
-                let (params, mut return_type) = ct.get_signature_dynamic(slf.stype, *method_name)?;
+                let callee_type = if slf.stype == sym("SELF_TYPE") {
+                    cls
+                } else {
+                    slf.stype
+                };
+                let (params, mut return_type) =
+                    ct.get_signature_dynamic(callee_type, *method_name)?;
                 if return_type == "SELF_TYPE" {
-                    return_type = slf.stype.clone();
+                    return_type = slf.stype;
                 }
 
                 for (next_param, arg) in args.iter_mut().enumerate() {
                     arg.analyze(ct, env, cls)?;
                     if ct
-                        .assert_subtype(arg.stype, params[next_param].typ)
+                        .assert_subtype(arg.stype, params[next_param].typ, cls)
                         .is_err()
                     {
                         let msg = format!(
@@ -168,9 +173,9 @@ impl Analyze for Expr {
                 slf,
             } => {
                 slf.analyze(ct, env, cls)?;
-                if ct.assert_subtype(slf.stype, *typ).is_err() {
+                if ct.assert_subtype(slf.stype, *typ, cls).is_err() {
                     let msg = format!(
-                        "In class {}, method {} dispatch type declared to be {}, 
+                        "In class {}, method {} static dispatch type declared to be {}, \
                         but found self expression of non-subtype type {}",
                         cls, method_name, typ, slf.stype
                     );
@@ -185,7 +190,7 @@ impl Analyze for Expr {
                 for (next_param, arg) in args.iter_mut().enumerate() {
                     arg.analyze(ct, env, cls)?;
                     if ct
-                        .assert_subtype(arg.stype, params[next_param].typ)
+                        .assert_subtype(arg.stype, params[next_param].typ, cls)
                         .is_err()
                     {
                         let msg = format!(
@@ -231,7 +236,8 @@ impl Analyze for Expr {
                 body,
             } => {
                 init.analyze(ct, env, cls)?;
-                if init.stype != sym("No_type") && ct.assert_subtype(init.stype, *typ).is_err() {
+                if init.stype != sym("No_type") && ct.assert_subtype(init.stype, *typ, cls).is_err()
+                {
                     let msg = format!(
                         "In class {}, let variable declared to be {}, 
                         but found initializer of non-subtype type {}",
@@ -248,7 +254,7 @@ impl Analyze for Expr {
 
                 env.exit_scope();
 
-                stype = body.stype.clone();
+                stype = body.stype;
             }
 
             ExprData::Loop { pred, body } => {
@@ -288,7 +294,7 @@ impl Analyze for Expr {
                 }
                 match exprs.last() {
                     Some(expr) => {
-                        stype = expr.stype.clone();
+                        stype = expr.stype;
                     }
                     None => {
                         panic!(
@@ -307,8 +313,7 @@ impl Analyze for Expr {
                         return Err(SemanticAnalysisError { msg });
                     }
                     Some(var_type) => {
-                        ct.assert_subtype(expr.stype, var_type)?;
-                        if ct.assert_subtype(expr.stype, var_type).is_err() {
+                        if ct.assert_subtype(expr.stype, var_type, cls).is_err() {
                             let msg = format!(
                                 "In class {}, assignment variable previously declared to 
                                 be of type {}, but assigned to non-subtype {}",
@@ -344,7 +349,7 @@ impl Analyze for Expr {
                 stype = sym("Bool");
             }
             ExprData::New { typ } => {
-                stype = typ.clone();
+                stype = *typ;
             }
             ExprData::Not { expr } => {
                 expr.analyze(ct, env, cls)?;
@@ -469,7 +474,6 @@ mod semant_tests {
         let result = program.semant();
         assert_eq!(result, Ok(()));
     }
-
     #[test]
     fn test_semant_features() {
         let c1: &str = r"
@@ -509,6 +513,49 @@ mod semant_tests {
         desired_env.add_binding(sym("b"), sym("Banana"));
         desired_env.add_binding(sym("c"), sym("Banana"));
         assert_eq!(env, desired_env);
+    }
+
+    #[test]
+    fn test_semant_program_is_called_recursively() {
+        let c1: &str = r"
+        class ABC {
+        a: Int <- 42;
+        b: Banana;
+        c: Banana <- b;
+        foo(): Banana {c};
+        };
+        ";
+
+        let mut program = Program::parse(c1).unwrap();
+        program.semant().unwrap();
+
+        let cls = program.classes.first().unwrap();
+
+        let f1 = cls.features.first().unwrap();
+        let f4 = cls.features.get(3).unwrap();
+
+        if let Feature::Attr {
+            name: _,
+            typ: _,
+            init,
+        } = f1
+        {
+            assert_eq!(init.stype, sym("Int"));
+        } else {
+            panic!("unreachable");
+        }
+
+        if let Feature::Method {
+            name: _,
+            formals: _,
+            typ: _,
+            body,
+        } = f4
+        {
+            assert_eq!(body.stype, sym("Banana"));
+        } else {
+            panic!("unreachable");
+        }
     }
 
     #[test]
@@ -635,6 +682,87 @@ mod semant_tests {
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Kiwi"));
+    }
+
+    #[test]
+    fn test_semant_dynamic_dispatch_selftype_self() {
+        let cls_cd_1: &str = r"
+        class Apple {foo(): SELF_TYPE {self};};
+        ";
+
+        let cls_cd_2: &str = r"
+        class Kiwi inherits Apple {};
+        ";
+
+        let attr_cd: &str = r"
+        a: Kiwi;
+        ";
+        let expr_cd: &str = r"
+        a.foo()
+        ";
+
+        let cls_1 = Class::parse(cls_cd_1).unwrap();
+        let cls_2 = Class::parse(cls_cd_2).unwrap();
+        let ct = ClassTable::new(&vec![cls_1, cls_2]).unwrap();
+        let mut env = Env::new();
+
+        let mut attr = Feature::parse(attr_cd).unwrap();
+        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        assert_eq!(result, Ok(()));
+
+        let mut expr = Expr::parse(expr_cd).unwrap();
+        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        assert_eq!(result, Ok(()));
+
+        assert_eq!(expr.stype, sym("Kiwi"));
+    }
+
+    #[test]
+    fn test_semant_dynamic_dispatch_simple_selftype() {
+        let code: &str = r"
+            class A inherits IO {
+                init() : SELF_TYPE {self};
+            };
+        ";
+
+        let mut cls = Class::parse(code).unwrap();
+        let ct = ClassTable::new(&vec![cls.to_owned()]).unwrap();
+        let mut env = Env::new();
+
+        let result = cls.semant(&ct, &mut env);
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn test_semant_dynamic_dispatch_on_self() {
+        let code: &str = r"
+            class A inherits IO {
+                foo() : Int {self.in_int()};
+            };
+        ";
+
+        let mut cls = Class::parse(code).unwrap();
+        let ct = ClassTable::new(&vec![cls.to_owned()]).unwrap();
+        let mut env = Env::new();
+
+        let result = cls.semant(&ct, &mut env);
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn test_semant_static_dispatch_on_self() {
+        let code: &str = r"
+            class A inherits IO {
+                foo() : Int {self@IO.in_int()};
+            };
+        ";
+
+        let mut cls = Class::parse(code).unwrap();
+        let ct = ClassTable::new(&vec![cls.to_owned()]).unwrap();
+        let mut env = Env::new();
+
+        let result = cls.semant(&ct, &mut env);
+        assert_eq!(result, Ok(()));
     }
 
     #[test]

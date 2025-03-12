@@ -29,8 +29,9 @@ fn main() {
     // }
 
     // Parse
-    let program: Program = Program::parse(&code).expect("Main program did not parse.");
+    let mut program: Program = Program::parse(&code).expect("Main program did not parse");
 
-    //TODO Implement Display for Program.
-    println!("{:?}", program)
+    program.semant().expect("Program did not typecheck");
+
+    println!("{:#?}", program)
 }

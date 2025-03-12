@@ -1,11 +1,14 @@
-class Apple {};
+class Apple {
+  b: Int <- 42;
+};
 
-class Orange inherits Bananas {
-    a: T1;
+class Orange inherits Apple {
+  foo() : Str {new Str};
+};
 
-    foo() : T2 {42};
 
-    b: T3 <- true;
+class Banana {
+    carol: Apple;
 
-    bar(c: S1, d: S2) : S3 {if true then carol else bob fi};
+    bar(x: Orange) : Apple {if true then carol else x fi};
 };

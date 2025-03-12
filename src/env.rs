@@ -33,7 +33,7 @@ impl Env {
         // Start search from top of stack.
         for scope in self.stack.iter().rev() {
             if let Some(value) = scope.get(&key) {
-                return Some(value.clone());
+                return Some(*value);
             }
         }
         None
@@ -46,7 +46,7 @@ impl Env {
         let top = self.stack.last_mut();
         match top {
             Some(frame) => {
-                frame.insert(key.clone(), value.clone());
+                frame.insert(key, value);
             }
             None => {
                 self.enter_scope();
@@ -76,13 +76,13 @@ mod env_tests {
 
         env.add_binding(key1, val1);
 
-        assert_eq!(env.lookup(key1), Some(val1.clone()));
+        assert_eq!(env.lookup(key1), Some(val1));
 
         env.enter_scope();
         env.add_binding(key2, val2_1);
 
         assert_eq!(env.lookup(key1), Some(val1));
-        assert_eq!(env.lookup(key2), Some(val2_1.clone()));
+        assert_eq!(env.lookup(key2), Some(val2_1));
 
         env.enter_scope();
         env.add_binding(key2, val2_2);

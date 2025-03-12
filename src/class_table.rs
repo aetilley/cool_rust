@@ -107,8 +107,8 @@ impl ClassTable {
                         );
                         return Err(SemanticAnalysisError { msg });
                     }
-                    visited.insert(child.clone());
-                    ClassTable::_mark_descendants(child.clone(), visited, class_children)?;
+                    visited.insert(*child);
+                    ClassTable::_mark_descendants(*child, visited, class_children)?;
                 }
                 Ok(())
             }
@@ -124,7 +124,7 @@ impl ClassTable {
         let mut detached_classes = hash_set! {};
         for key in class_children.keys() {
             if !visited.contains::<Sym>(key) {
-                detached_classes.insert(key.clone());
+                detached_classes.insert(*key);
             }
         }
         if !detached_classes.is_empty() {
@@ -145,16 +145,14 @@ impl ClassTable {
         class_children: &mut ClassChildrenTy,
     ) {
         if class.parent != "No_class" {
-            class_parent.insert(class.name.clone(), class.parent.clone());
+            class_parent.insert(class.name, class.parent);
             class_children
-                .entry(class.parent.clone())
+                .entry(class.parent)
                 .and_modify(|children| {
-                    children.insert(class.name.clone());
+                    children.insert(class.name);
                 })
-                .or_insert(hash_set! {class.name.clone()});
-            class_children
-                .entry(class.name.clone())
-                .or_insert(hash_set! {});
+                .or_insert(hash_set! {class.name});
+            class_children.entry(class.name).or_insert(hash_set! {});
         }
 
         let mut method_signature = HashMap::<Sym, Signature>::new();
@@ -171,7 +169,7 @@ impl ClassTable {
             }
         }
 
-        class_method_signature.insert(class.name.clone(), method_signature);
+        class_method_signature.insert(class.name, method_signature);
     }
 
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
@@ -201,8 +199,8 @@ impl ClassTable {
         ClassTable::detect_cycles(&class_children)?;
 
         //let native_class_names = native_classes.map
-        let class_names = classes.iter().map(|cls| cls.name.clone()).collect();
-        let native_class_names = native_classes.iter().map(|cls| cls.name.clone()).collect();
+        let class_names = classes.iter().map(|cls| cls.name).collect();
+        let native_class_names = native_classes.iter().map(|cls| cls.name).collect();
         Ok(ClassTable {
             native_classes: native_class_names,
             classes: class_names,
@@ -245,7 +243,7 @@ impl ClassTable {
         while let Some(parent) = self.class_parent.get(&class_name) {
             match self.get_signature(next, method_name) {
                 Err(_) => {
-                    next = parent.clone();
+                    next = *parent;
                 }
                 Ok(signature) => {
                     return Ok(signature);
@@ -268,48 +266,56 @@ impl ClassTable {
         let mut ancestry2 = vec![t2];
         let mut next = t1;
         while let Some(parent) = self.class_parent.get(&next) {
-            ancestry1.push(parent.clone());
-            next = parent.clone();
+            ancestry1.push(*parent);
+            next = *parent;
         }
         let mut next = t2;
         while let Some(parent) = self.class_parent.get(&next) {
-            ancestry2.push(parent.clone());
-            next = parent.clone();
+            ancestry2.push(*parent);
+            next = *parent;
         }
         let mut rev_pairs = ancestry1.into_iter().rev().zip(ancestry2.into_iter().rev());
         let (e1, e2) = rev_pairs.next().unwrap();
-        if e1 != e2 || e1 != "Object" {
-            panic!("Ancestries somehow doen't both start at type Object");
+
+        if e1 != "Object" {
+            panic!("Ancestry of type {} doesn't begin at type Object", t1);
+        }
+        if e2 != "Object" {
+            panic!("Ancestry of type {} doesn't begin at type Object", t2);
         }
         let mut lub = e1;
         for (e1, e2) in rev_pairs {
             if e1 != e2 {
-                return lub.clone();
+                return lub;
             }
             lub = e1
         }
         lub
     }
 
-    pub fn assert_subtype(&self, t1: Sym, t2: Sym) -> Result<(), SemanticAnalysisError> {
+    pub fn assert_subtype(&self, t1: Sym, t2: Sym, cls: Sym) -> Result<(), SemanticAnalysisError> {
         // If this function gets called on "No_type" almost certainly something has
         // gone wrong.
+        // Note that the class is passed in just in case either of the arguments is SELF_TYPE.
         assert_ne!(t1, sym("No_type"));
         assert_ne!(t2, sym("No_type"));
 
-        if t1 == t2 {
+        let s1 = if t1 == sym("SELF_TYPE") { cls } else { t1 };
+        let s2 = if t2 == sym("SELF_TYPE") { cls } else { t2 };
+
+        if s1 == s2 {
             return Ok(());
         }
 
-        let mut next = t1;
+        let mut next = s1;
         while let Some(parent) = self.class_parent.get(&next) {
-            if parent == &t2 {
+            if parent == &s2 {
                 return Ok(());
             };
-            next = parent.clone();
+            next = *parent;
         }
 
-        let msg = format!("Type {} is not a subtype of type {}", t1, t2);
+        let msg = format!("Type {} is not a subtype of type {}", s1, s2);
         Err(SemanticAnalysisError { msg })
     }
 }
@@ -326,19 +332,31 @@ mod class_table_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
         let t1 = sym("Int");
         let t2 = sym("Int");
-        let result = ct.assert_subtype(t1, t2);
+        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
         let t1 = sym("Int");
         let t2 = sym("Object");
-        let result = ct.assert_subtype(t1, t2);
+        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
         let t1 = sym("Object");
         let t2 = sym("Int");
-        let result = ct.assert_subtype(t1, t2);
+        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
+        assert!(result.is_err());
+
+        let ct = ClassTable::new(&vec![]).unwrap();
+        let t1 = sym("SELF_TYPE");
+        let t2 = sym("Orange");
+        let result = ct.assert_subtype(t1, t2, sym("Orange"));
+        assert_eq!(result, Ok(()));
+
+        let ct = ClassTable::new(&vec![]).unwrap();
+        let t1 = sym("SELF_TYPE");
+        let t2 = sym("Int");
+        let result = ct.assert_subtype(t1, t2, sym("Orange"));
         assert!(result.is_err());
     }
 
@@ -429,7 +447,6 @@ mod class_table_tests {
             result.class_method_signature,
             desired_class_method_signature
         );
-
     }
 
     #[test]
