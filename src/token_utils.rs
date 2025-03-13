@@ -1,3 +1,11 @@
+// Utilities for stripping long, deeply nested comments, and for adjusting
+// the byte offsets of various code objects that were computed after
+// the strip.
+// The latter is necessary since we get the spans of our parser objects
+// when the parser reads the stripped file, but we want to report the
+// location of objects (say to the user during a compilation error)
+// with respect to the non-stripped file.
+
 use std::collections::BTreeMap;
 
 use crate::token::{LexicalError, Token};
@@ -8,8 +16,14 @@ use lalrpop_util::ParseError;
 pub struct CommentError {
     pub msg: String,
 }
-// This map indicates the byte positions in the resulting stripped string
-// comments were removed and how many bytes they were.
+
+// Some terminology for the following:
+// removal_map:  A map from start bytes of comments (in a text to be
+// stripped) to the lenght of that comment.
+// insertion_map: A map from bytes (in an already stripped text) immediately
+// following the space where a comment was stripped.  That is, if
+// i |-> L, then there was a comment of length L in the original text
+// between the characters that are now at positions i-1 and i.
 
 pub fn _strip_long_comments_and_get_removal_map(
     input: &str,
@@ -132,14 +146,18 @@ pub fn strip_long_comments_and_get_insertion_map(
     Ok((text, insertion_map))
 }
 
-pub fn get_updated_location(loc: usize, insertion_map: &BTreeMap<usize, usize>) -> usize {
-    let loc_increase: usize = insertion_map
+pub fn get_updated_location(
+    original_location: usize,
+    insertion_map: &BTreeMap<usize, usize>,
+) -> usize {
+    // Where a character (not inside a comment) in a stripped file was before stripping.
+    let location_increase: usize = insertion_map
         .iter()
-        .filter(|(k, _)| k <= &&loc)
+        .filter(|(k, _)| k <= &&original_location)
         .map(|(_, v)| v)
         .sum();
 
-    loc + loc_increase
+    original_location + location_increase
 }
 
 pub fn get_updated_span(
@@ -152,10 +170,13 @@ pub fn get_updated_span(
     (new_start, new_end)
 }
 
-pub fn adjust_location_in_parse_error(
+pub fn adjust_locations_in_parse_error(
     err: &mut ParseError<usize, Token, LexicalError>,
     insertion_map: &BTreeMap<usize, usize>,
 ) {
+    // Parsing is done with respect to the comment stripped files, and this the locations in
+    // `ParseError`s will not match the original source code.  Here we update them given an
+    // insertion_map.
     match err {
         ParseError::InvalidToken { location } => {
             let new_loc = get_updated_location(*location, insertion_map);

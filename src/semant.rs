@@ -201,6 +201,17 @@ impl Analyze for Expr {
                     return_type = slf.stype;
                 }
 
+                if args.len() != params.len() {
+                    let msg = format!(
+                        "In call to method {} at {:?}, method has {} \
+                        parameters but received {} arguments.",
+                        method_name,
+                        span,
+                        params.len(),
+                        args.len()
+                    );
+                    return Err(SemanticAnalysisError { msg });
+                }
                 for (next_param, arg) in args.iter_mut().enumerate() {
                     arg.analyze(ct, env, cls)?;
                     if ct
@@ -351,13 +362,6 @@ impl Analyze for Expr {
             }
             ExprData::IsVoid { expr } => {
                 expr.analyze(ct, env, cls)?;
-                if expr.stype != sym("Bool") {
-                    let msg = format!(
-                        "Argument to isvoid at {:?} was of non-Bool type {}",
-                        span, expr.stype
-                    );
-                    return Err(SemanticAnalysisError { msg });
-                }
                 stype = sym("Bool");
             }
             ExprData::New { typ } => {
@@ -528,7 +532,29 @@ mod semant_tests {
     }
 
     #[test]
-    fn test_semant_program_is_called_recursively() {
+    fn test_semant_features_wrong_types() {
+        let c1: &str = r#"
+        a: Int <- "hello";
+        "#;
+
+        let c2: &str = r"
+        foo(): Banana {42};
+        ";
+
+        let mut env = Env::new();
+        let ct = ClassTable::new(&vec![]).unwrap();
+
+        let mut f1 = Feature::parse(c1).unwrap();
+        let result = f1.analyze(&ct, &mut env, sym("UNUSED"));
+        assert!(result.is_err());
+
+        let mut f2 = Feature::parse(c2).unwrap();
+        let result = f2.analyze(&ct, &mut env, sym("UNUSED"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_semant_program_calls_analyze_down_to_exprs() {
         let c1: &str = r"
         class ABC {
         a: Int <- 42;
@@ -573,7 +599,7 @@ mod semant_tests {
     #[test]
     fn test_semant_dispatch() {
         let cls_cd: &str = r"
-        class Apple {foo(): Banana {42};};
+        class Apple {foo(): Banana {new Banana};};
         ";
         let attr_cd: &str = r"
         a: Apple;
@@ -595,6 +621,31 @@ mod semant_tests {
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Banana"));
+    }
+
+    #[test]
+    fn test_semant_dispatch_wrong_number_of_args() {
+        let cls_cd: &str = r"
+        class Apple {foo(x: Int): Int {42};};
+        ";
+        let attr_cd: &str = r"
+        a: Apple;
+        ";
+        let expr_cd: &str = r"
+        a.foo()
+        ";
+
+        let cls = Class::parse(cls_cd).unwrap();
+        let ct = ClassTable::new(&vec![cls]).unwrap();
+        let mut env = Env::new();
+
+        let mut attr = Feature::parse(attr_cd).unwrap();
+        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        assert_eq!(result, Ok(()));
+
+        let mut expr = Expr::parse(expr_cd).unwrap();
+        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -631,6 +682,31 @@ mod semant_tests {
     }
 
     #[test]
+    fn test_semant_static_dispatch_wrong_number_of_args() {
+        let cls_cd: &str = r"
+        class Apple {foo(x: Int): Int {42};};
+        ";
+        let attr_cd: &str = r"
+        a: Apple;
+        ";
+        let expr_cd: &str = r"
+        a@Apple.foo(1, 2)
+        ";
+
+        let cls = Class::parse(cls_cd).unwrap();
+        let ct = ClassTable::new(&vec![cls]).unwrap();
+        let mut env = Env::new();
+
+        let mut attr = Feature::parse(attr_cd).unwrap();
+        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        assert_eq!(result, Ok(()));
+
+        let mut expr = Expr::parse(expr_cd).unwrap();
+        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_semant_dynamic_dispatch_nontrivial() {
         let cls_cd_1: &str = r"
         class Apple {foo(): Banana {42};};
@@ -661,6 +737,22 @@ mod semant_tests {
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Banana"));
+    }
+
+    #[test]
+    fn test_semant_dynamic_dispatch_simple_selftype() {
+        let code: &str = r"
+            class A inherits IO {
+                init() : SELF_TYPE {self};
+            };
+        ";
+
+        let mut cls = Class::parse(code).unwrap();
+        let ct = ClassTable::new(&vec![cls.to_owned()]).unwrap();
+        let mut env = Env::new();
+
+        let result = cls.semant(&ct, &mut env);
+        assert_eq!(result, Ok(()));
     }
 
     #[test]
@@ -730,42 +822,10 @@ mod semant_tests {
     }
 
     #[test]
-    fn test_semant_dynamic_dispatch_simple_selftype() {
-        let code: &str = r"
-            class A inherits IO {
-                init() : SELF_TYPE {self};
-            };
-        ";
-
-        let mut cls = Class::parse(code).unwrap();
-        let ct = ClassTable::new(&vec![cls.to_owned()]).unwrap();
-        let mut env = Env::new();
-
-        let result = cls.semant(&ct, &mut env);
-        assert_eq!(result, Ok(()));
-    }
-
-    #[test]
     fn test_semant_dynamic_dispatch_on_self() {
         let code: &str = r"
             class A inherits IO {
                 foo() : Int {self.in_int()};
-            };
-        ";
-
-        let mut cls = Class::parse(code).unwrap();
-        let ct = ClassTable::new(&vec![cls.to_owned()]).unwrap();
-        let mut env = Env::new();
-
-        let result = cls.semant(&ct, &mut env);
-        assert_eq!(result, Ok(()));
-    }
-
-    #[test]
-    fn test_semant_static_dispatch_on_self() {
-        let code: &str = r"
-            class A inherits IO {
-                foo() : Int {self@IO.in_int()};
             };
         ";
 
@@ -815,6 +875,21 @@ mod semant_tests {
 
         assert_eq!(e1.stype, sym("Int"));
         assert_eq!(e2.stype, sym("IO"));
+    }
+
+    #[test]
+    fn test_semant_let_bad_type() {
+        let c1: &str = r"
+        let x: Int in not x 
+        ";
+
+        let mut e1 = Expr::parse(c1).unwrap();
+
+        let mut env = Env::new();
+        let ct = ClassTable::new(&vec![]).unwrap();
+
+        let result1 = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        assert!(result1.is_err());
     }
 
     #[test]
@@ -888,6 +963,20 @@ mod semant_tests {
     }
 
     #[test]
+    fn test_semant_exprs_plus_string() {
+        let c1: &str = r#"
+        42 + "hello"
+        "#;
+        let mut e1 = Expr::parse(c1).unwrap();
+
+        let mut env = Env::new();
+        let ct = ClassTable::new(&vec![]).unwrap();
+
+        let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_semant_simple_lookup() {
         let c1: &str = r"
         a: Apple;
@@ -913,14 +1002,20 @@ mod semant_tests {
         let c2: &str = r#"
         b
         "#;
+        let c3: &str = r#"
+        c
+        "#;
         let mut e1 = Expr::parse(c1).unwrap();
         let mut e2 = Expr::parse(c2).unwrap();
+        let mut e3 = Expr::parse(c3).unwrap();
         let result1 = e1.analyze(&ct, &mut env, sym("UNUSED"));
         let result2 = e2.analyze(&ct, &mut env, sym("UNUSED"));
+        let result3 = e3.analyze(&ct, &mut env, sym("UNUSED"));
         assert_eq!(result1, Ok(()));
-        assert_eq!(result2, Ok(()));
         assert_eq!(e1.stype, sym("Apple"));
+        assert_eq!(result2, Ok(()));
         assert_eq!(e2.stype, sym("Banana"));
+        assert!(result3.is_err());
     }
 
     #[test]
@@ -984,7 +1079,7 @@ mod semant_tests {
     }
 
     #[test]
-    fn test_semant_problematic() {
+    fn test_semant_undefined_method() {
         let code: &str = r#"
         class B {
         x: B;

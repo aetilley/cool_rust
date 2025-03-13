@@ -250,6 +250,9 @@ impl Expr {
 }
 impl PartialEq for Expr {
     fn eq(&self, other: &Self) -> bool {
+        // We ignore ignore metadata to simplify testing.
+        // (It's rare that we'd be checking two ASTs for identity
+        // outside of testing.)
         self.data == other.data
     }
 }

@@ -6,6 +6,7 @@ type Scope = HashMap<Sym, Sym>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Env {
+    // A stack of local environments to keep track of what variables are in scope.
     // Since `Vec::push` pushes to the back of the vector, we will
     // use the back as the "top" of the stack.
     stack: Vec<Scope>,
@@ -40,7 +41,7 @@ impl Env {
     }
 
     pub fn add_binding(&mut self, key: Sym, value: Sym) {
-        // NOTE:  Currently does not throw if the key already exists
+        // NOTE:  Currently does not Err if the key already exists
         // in the current scope. Sometimes we may want to throw an error
         // E.g. if a symbol appears twice in a function param list.
         let top = self.stack.last_mut();

@@ -1,11 +1,9 @@
-// ### Token constants and lexing library. ###
-
-use std::collections::HashSet;
-use std::fmt;
+// ### Lexing library. ###
 
 use crate::token_utils::strip_long_comments_and_get_insertion_map;
-
 use logos::{Lexer, Logos, SpannedIter};
+use std::collections::HashSet;
+use std::fmt;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct StringLiteralError {
@@ -66,8 +64,7 @@ fn str_const_callback(lex: &str) -> Result<String, StringLiteralError> {
 
 fn error_callback(lex: &mut Lexer<Token>) -> String {
     let lex = lex.slice().to_string();
-    // TODO! Check length and handle backslashes.
-    format!("Error trying to lex at character {}", lex)
+    format!("Error trying to tokenize at character {}", lex)
 }
 
 #[derive(Logos, Debug, PartialEq, Clone)]
@@ -270,9 +267,7 @@ mod token_tests {
 
 // #######  For LALRPOP Parser #########
 //
-// lalrpop parser needs an iterator like CoolLexer below.
-pub type Spanned<Tok, Loc, Error> = Result<(Loc, Tok, Loc), Error>;
-
+// lalrpop parser needs an iterator like that of CoolLexer below.
 pub struct CoolLexer<'input> {
     token_stream: SpannedIter<'input, Token>,
 }
@@ -293,7 +288,7 @@ pub enum LexicalError {
 }
 
 impl Iterator for CoolLexer<'_> {
-    type Item = Spanned<Token, usize, LexicalError>;
+    type Item = Result<(usize, Token, usize), LexicalError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.token_stream.next() {
