@@ -5,6 +5,7 @@ use std::path::Path;
 
 use cool_rust::ast::Program;
 use cool_rust::ast_parse::Parse;
+//use cool_rust::ast_codegen::compile;
 
 fn main() {
     let user_args: Vec<String> = env::args().collect();
@@ -33,5 +34,9 @@ fn main() {
 
     program.semant().expect("Program did not typecheck");
 
-    println!("{:#?}", program)
+    // println!("{:#?}", program)
+
+    let out = program.to_llvm();
+
+    println!("{}", out)
 }

@@ -13,6 +13,12 @@ jobs:
       # Checkout
       - uses: actions/checkout@v2
 
+      # Install LLVM
+      - name: Setup LLVM
+        uses: ZhongRuoyu/setup-llvm@v0
+        with:
+          llvm-version: 18
+
       # Install
       - name: Install minimal stable with clippy and rustfmt
         uses: actions-rs/toolchain@v1
