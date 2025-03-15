@@ -1,20 +1,25 @@
 use crate::ast::Program;
+use crate::class_table::ClassTable;
 use crate::codegen_manager::CodeGenManager;
 
 use inkwell::context::Context;
-use inkwell::values::IntValue;
 
 impl Program {
-    pub fn to_llvm(&self) -> String {
+    pub fn to_llvm(&self) {
         let context = Context::create();
-        let cgm = CodeGenManager::init(&context);
-        let _ = self.codegen(&cgm);
-        format!("{}", cgm.module.print_to_string())
-    }
-
-    // Would be nice to make this a trait, but not clear what to make the
-    // return value.
-    fn codegen<'a>(&self, cgm: &CodeGenManager<'a>) -> IntValue<'a> {
-        cgm.context.i64_type().const_int(42, false)
+        let ct = ClassTable::new(&self.classes).expect(
+            "Failure to construct ClassTable \
+            from program (should have been caught \
+            in semantic analysis).",
+        );
+        let cgm = CodeGenManager::init(&context, ct);
+        //
+        cgm.code_all_class_structs();
+        //
+        cgm.code_all_inits();
+        //
+        cgm.code_all_methods();
+        //
+        cgm.module.print_to_file("out.ll").unwrap();
     }
 }

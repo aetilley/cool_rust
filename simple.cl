@@ -3,6 +3,7 @@ class Apple {
 };
 
 class Orange inherits Apple {
+  c: String;
   foo() : Str {new Str};
 };
 

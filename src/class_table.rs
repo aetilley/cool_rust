@@ -13,14 +13,17 @@ type ClassParentTy = HashMap<Sym, Sym>;
 type ClassChildrenTy = HashMap<Sym, HashSet<Sym>>;
 type Signature = (Formals, Sym);
 type ClassMethodSignatureTy = HashMap<Sym, HashMap<Sym, Signature>>;
+type AttrAndType = (Sym, Sym);
+type ClassAttrAndTypeTy = HashMap<Sym, Vec<AttrAndType>>;
 
 #[derive(Debug, PartialEq)]
 pub struct ClassTable {
-    native_classes: HashSet<Sym>,
-    classes: HashSet<Sym>,
-    class_parent: ClassParentTy,
-    class_children: ClassChildrenTy,
-    class_method_signature: ClassMethodSignatureTy,
+    pub native_classes: HashSet<Sym>,
+    pub classes: HashSet<Sym>,
+    pub class_parent: ClassParentTy,
+    pub class_children: ClassChildrenTy,
+    pub class_method_signature: ClassMethodSignatureTy,
+    pub class_attrs: ClassAttrAndTypeTy,
 }
 
 impl ClassTable {
@@ -138,9 +141,10 @@ impl ClassTable {
         Ok(())
     }
 
-    fn register_methods_and_relatives(
+    fn register_attrs_methods_and_relatives(
         class: &Class,
         class_method_signature: &mut ClassMethodSignatureTy,
+        class_attrs: &mut ClassAttrAndTypeTy,
         class_parent: &mut ClassParentTy,
         class_children: &mut ClassChildrenTy,
     ) {
@@ -155,42 +159,51 @@ impl ClassTable {
             class_children.entry(class.name).or_insert(hash_set! {});
         }
 
+        let mut attrs = Vec::<AttrAndType>::new();
         let mut method_signature = HashMap::<Sym, Signature>::new();
 
         for feature in class.features.iter() {
-            if let Feature::Method {
-                name,
-                formals,
-                typ,
-                body: _,
-            } = feature
-            {
-                method_signature.insert(*name, (formals.clone(), *typ));
+            match feature {
+                Feature::Method {
+                    name,
+                    formals,
+                    typ,
+                    body: _,
+                } => {
+                    method_signature.insert(*name, (formals.clone(), *typ));
+                }
+                Feature::Attr { name, typ, init: _ } => {
+                    attrs.push((*name, *typ));
+                }
             }
         }
 
         class_method_signature.insert(class.name, method_signature);
+        class_attrs.insert(class.name, attrs);
     }
 
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
         let mut class_parent = HashMap::<Sym, Sym>::new();
         let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
+        let mut class_attrs = HashMap::<Sym, Vec<AttrAndType>>::new();
         let mut class_method_signature = HashMap::<Sym, HashMap<Sym, Signature>>::new();
 
         let native_classes = ClassTable::create_native_classes();
         for class in native_classes.iter() {
-            ClassTable::register_methods_and_relatives(
+            ClassTable::register_attrs_methods_and_relatives(
                 class,
                 &mut class_method_signature,
+                &mut class_attrs,
                 &mut class_parent,
                 &mut class_children,
             );
         }
 
         for class in classes.iter() {
-            ClassTable::register_methods_and_relatives(
+            ClassTable::register_attrs_methods_and_relatives(
                 class,
                 &mut class_method_signature,
+                &mut class_attrs,
                 &mut class_parent,
                 &mut class_children,
             );
@@ -207,7 +220,20 @@ impl ClassTable {
             class_parent,
             class_children,
             class_method_signature,
+            class_attrs,
         })
+    }
+
+    pub fn get_all_attrs(&self, name: Sym) -> Vec<AttrAndType> {
+        // Get attrs of class `name` and of all ancestors.
+        let mut result = Vec::<AttrAndType>::new();
+        if let Some(parent) = self.class_parent.get(&name) {
+            result = self.get_all_attrs(*parent);
+        }
+        for attr in self.class_attrs.get(&name).unwrap() {
+            result.push(*attr)
+        }
+        result
     }
 
     pub fn get_signature(
@@ -365,8 +391,9 @@ mod class_table_tests {
     #[test]
     fn test_constructor() {
         let code: &str = r"
-        class Apple {};
+        class Apple {a: IO;};
         class Orange inherits Apple {
+            b: Apple;
             foo() : T2 {42};
             bar(c: S1, d: S2) : S3 {true};
         };
@@ -439,6 +466,18 @@ mod class_table_tests {
                 sym("foo") => (vec![], sym("T2")),
                 sym("bar") => (vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")], sym("S3")),
             },
+
+
+        };
+
+        let desired_class_attrs = hash_map! {
+            sym("Object") => vec![],
+            sym("IO")=>vec![],
+            sym("Int")=>vec![(sym("val"), sym("prim_slot"))],
+            sym("Bool")=>vec![(sym("val"), sym("prim_slot"))],
+            sym("String")=>vec![(sym("val"), sym("Int")), (sym("str_field"), sym("prim_slot"))],
+            sym("Apple")=>vec![(sym("a"), sym("IO"))],
+            sym("Orange")=>vec![(sym("b"), sym("Apple"))],
         };
 
         assert_eq!(result.classes, desired_classes);
@@ -449,6 +488,7 @@ mod class_table_tests {
             result.class_method_signature,
             desired_class_method_signature
         );
+        assert_eq!(result.class_attrs, desired_class_attrs);
     }
 
     #[test]

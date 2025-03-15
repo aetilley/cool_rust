@@ -36,7 +36,6 @@ fn main() {
 
     // println!("{:#?}", program)
 
-    let out = program.to_llvm();
-
-    println!("{}", out)
+    // print to out.ll
+    program.to_llvm();
 }
