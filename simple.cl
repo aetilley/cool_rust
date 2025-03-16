@@ -1,15 +1,21 @@
 class Apple {
-  b: Int <- 42;
+  b: Int;
 };
 
 class Orange inherits Apple {
-  c: String;
-  foo() : Str {new Str};
+  c: String <- "hello world\n\n";
+  foo() : String {"heya"};
 };
 
 
 class Banana {
     carol: Apple;
 
-    bar(x: Orange) : Apple {if true then carol else x fi};
+    bar() : Orange {new Orange};
+};
+
+class Main {
+    main() : Object {(new IO)@IO.out_string("Buenos Dias, Mundo.")};
+
+
 };

@@ -148,8 +148,8 @@ impl Analyze for Expr {
                     slf.stype
                 };
 
-                let (params, mut return_type) =
-                    ct.get_signature_dynamic(callee_type, *method_name)?;
+                let ((params, mut return_type), _) =
+                    ct.get_method_dynamic(callee_type, *method_name)?;
                 if return_type == "SELF_TYPE" {
                     return_type = slf.stype;
                 }
@@ -196,7 +196,7 @@ impl Analyze for Expr {
                     return Err(SemanticAnalysisError { msg });
                 }
 
-                let (params, mut return_type) = ct.get_signature(*typ, *method_name)?;
+                let ((params, mut return_type), _) = ct.get_method(*typ, *method_name)?;
                 if return_type == sym("SELF_TYPE") {
                     return_type = slf.stype;
                 }

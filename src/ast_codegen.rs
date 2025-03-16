@@ -12,14 +12,19 @@ impl Program {
             from program (should have been caught \
             in semantic analysis).",
         );
-        let cgm = CodeGenManager::init(&context, ct);
+        let mut cgm = CodeGenManager::init(&context, ct);
+        //
+        // cgm.module.set_source_file_name()
         //
         cgm.code_all_class_structs();
+        //
+        cgm.register_globals();
         //
         cgm.code_all_inits();
         //
         cgm.code_all_methods();
         //
+        cgm.module.verify().unwrap();
         cgm.module.print_to_file("out.ll").unwrap();
     }
 }
