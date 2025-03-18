@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Class, Classes, Expr, Feature, Formal, Formals};
 use crate::semant::SemanticAnalysisError;
@@ -7,6 +6,7 @@ use crate::semant::SemanticAnalysisError;
 use crate::symbol::{sym, Sym};
 
 use common_macros::hash_set;
+use itertools::sorted;
 
 type ClassesTy = HashSet<Sym>;
 type ClassParentTy = HashMap<Sym, Sym>;
@@ -18,6 +18,8 @@ type AttrTypeInit = (Sym, Sym, Expr);
 type ClassAttrTy = HashMap<Sym, Vec<AttrTypeInit>>;
 type VTableTy = HashMap<Sym, Sym>;
 type ClassVTableTy = HashMap<Sym, VTableTy>;
+type MethodOffsetTy = HashMap<Sym, usize>;
+type ClassMethodOffsetTy = HashMap<Sym, MethodOffsetTy>;
 
 #[derive(Debug, PartialEq)]
 pub struct ClassTable {
@@ -28,6 +30,7 @@ pub struct ClassTable {
     pub class_methods: ClassMethodTy,
     pub class_attrs: ClassAttrTy,
     pub class_vtable: ClassVTableTy,
+    pub class_method_offset: ClassMethodOffsetTy,
 }
 
 impl ClassTable {
@@ -188,29 +191,55 @@ impl ClassTable {
         class_attrs.insert(class.name, attrs);
     }
 
-    fn register_vtable_for_class(
+    fn register_vtable_and_method_offsets_for_class(
         cls: Sym,
         class_parent: &ClassParentTy,
         class_methods: &ClassMethodTy,
-        class_vtable: &mut ClassVTableTy
+        class_vtable: &mut ClassVTableTy,
+        class_method_offset: &mut ClassMethodOffsetTy,
     ) {
         let mut vtable = HashMap::<Sym, Sym>::new();
+        let mut method_offset = HashMap::<Sym, usize>::new();
 
+        // First add all methods for parent.
         if let Some(parent) = class_parent.get(&cls) {
             if !class_vtable.contains_key(parent) {
-                ClassTable::register_vtable_for_class(*parent, class_parent, class_methods, class_vtable);
+                ClassTable::register_vtable_and_method_offsets_for_class(
+                    *parent,
+                    class_parent,
+                    class_methods,
+                    class_vtable,
+                    class_method_offset,
+                );
             }
             vtable = class_vtable.get(&parent).unwrap().clone();
+            method_offset = class_method_offset.get(&parent).unwrap().clone();
         } else {
-            assert!(cls == sym("Object"), "Non-Object class {} has no parent.", cls);
+            assert!(
+                cls == sym("Object"),
+                "Non-Object class {} has no parent.",
+                cls
+            );
         }
 
-        // Add methods new to this class.
-        for (method_name, _) in class_methods.get(&cls).unwrap().iter() {
+        let mut next = method_offset.len();
+        // Then add methods new to this class:
+        // Sorting will make testing simpler.
+        let methods = sorted(class_methods.get(&cls).unwrap().keys());
+        for method_name in methods {
             vtable.insert(*method_name, cls);
+
+            if method_offset.contains_key(method_name) {
+                // Override parent, use same offset.
+                method_offset.insert(*method_name, *method_offset.get(method_name).unwrap());
+            } else {
+                // New function name.
+                method_offset.insert(*method_name, next);
+                next = next + 1;
+            }
         }
         class_vtable.insert(cls, vtable);
-
+        class_method_offset.insert(cls, method_offset);
     }
 
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
@@ -218,7 +247,6 @@ impl ClassTable {
         let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
         let mut class_attrs = HashMap::<Sym, Vec<AttrTypeInit>>::new();
         let mut class_methods = HashMap::<Sym, HashMap<Sym, Method>>::new();
-
 
         let program_classes = classes.to_owned();
         let native_classes = ClassTable::create_native_classes();
@@ -239,23 +267,31 @@ impl ClassTable {
 
         let all_class_names: ClassesTy = all_classes.iter().map(|cls| cls.name).collect();
         let program_class_names: ClassesTy = program_classes.iter().map(|cls| cls.name).collect();
-        let native_class_names : ClassesTy = native_classes.iter().map(|cls| cls.name).collect();
-
+        let native_class_names: ClassesTy = native_classes.iter().map(|cls| cls.name).collect();
 
         let mut class_vtable = HashMap::<Sym, HashMap<Sym, Sym>>::new();
+        let mut class_method_offset = HashMap::<Sym, HashMap<Sym, usize>>::new();
+
         for cls in all_class_names.iter() {
-            ClassTable::register_vtable_for_class(*cls, &class_parent, &class_methods, &mut class_vtable);
+            ClassTable::register_vtable_and_method_offsets_for_class(
+                *cls,
+                &class_parent,
+                &class_methods,
+                &mut class_vtable,
+                &mut class_method_offset,
+            );
         }
 
         //let native_class_names = native_classes.map
         Ok(ClassTable {
-            native_classes : native_class_names,
-            program_classes : program_class_names,
+            native_classes: native_class_names,
+            program_classes: program_class_names,
             class_parent,
             class_children,
             class_methods,
             class_attrs,
             class_vtable,
+            class_method_offset,
         })
     }
 
@@ -437,7 +473,6 @@ mod class_table_tests {
         };
         ";
 
-
         let program = Program::parse(code).unwrap();
 
         let result = ClassTable::new(&program.classes).unwrap();
@@ -571,6 +606,55 @@ mod class_table_tests {
 
         );
 
+        let desired_class_method_offset = hash_map!(
+            sym("Object") => hash_map!(
+                sym("abort") => 0,
+                sym("copy") => 1,
+                sym("type_name") => 2,
+            ),
+            sym("IO") => hash_map!(
+                sym("abort") => 0,
+                sym("copy") => 1,
+                sym("type_name") => 2,
+                sym("in_int") => 3,
+                sym("in_string") => 4,
+                sym("out_int") => 5,
+                sym("out_string") => 6,
+            ),
+            sym("String") => hash_map!(
+                sym("abort") => 0,
+                sym("copy") => 1,
+                sym("type_name") => 2,
+                sym("concat") => 3,
+                sym("length") => 4,
+                sym("substr") => 5,
+            ),
+            sym("Bool") => hash_map!(
+                sym("abort") => 0,
+                sym("copy") => 1,
+                sym("type_name") => 2,
+            ),
+            sym("Int") => hash_map!(
+                sym("abort") => 0,
+                sym("copy") => 1,
+                sym("type_name") => 2,
+            ),
+            sym("Apple") => hash_map!(
+                sym("abort") => 0,
+                sym("copy") => 1,
+                sym("type_name") => 2,
+                sym("foo") => 3,
+            ),
+            sym("Orange") => hash_map!(
+                sym("abort") => 0,
+                sym("copy") => 1,
+                sym("type_name") => 2,
+                sym("foo") => 3,
+                sym("bar") => 4,
+            ),
+
+        );
+
         assert_eq!(result.program_classes, desired_program_classes);
         assert_eq!(result.native_classes, desired_native_classes);
         assert_eq!(result.class_parent, desired_class_parent);
@@ -578,7 +662,7 @@ mod class_table_tests {
         assert_eq!(result.class_methods, desired_class_methods);
         assert_eq!(result.class_attrs, desired_class_attrs);
         assert_eq!(result.class_vtable, desired_class_vtable);
-
+        assert_eq!(result.class_method_offset, desired_class_method_offset);
     }
 
     #[test]

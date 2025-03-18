@@ -114,7 +114,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             .map(|(_name, typ, _)| self.sym_to_llvm_type(*typ))
             .collect();
         // vtable 
-        all_attr_types.append(&mut other_attr_types_vec);
+        all_attr_types.extend(other_attr_types_vec);
         let typ = self.context.get_struct_type(name.as_str()).unwrap();
         typ.set_body(&all_attr_types, false);
     }
@@ -137,45 +137,30 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
+
+    // VTables
+    // fn code_vtable_for_class(&mut self, cls: Sym) {
+    //     let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
+
+
+
+    // }
+
+    // pub fn code_vtables(&mut self) {
+    //     for cls in self.ct.native_classes.iter() {
+    //         self.code_vtable_for_class(*cls);
+    //     }
+    //     for cls in self.ct.program_classes.iter() {
+    //         self.code_vtable_for_class(*cls);
+    //     }
+    // }
+
     // Global data
     pub fn register_globals(&mut self) {
         // self.register_vtable_pointers();
         // self.register_default_values();
     }
 
-
-
-    // pub fn register_default_values(&mut self) {
-    //     // Default Int
-    //     let zero = BasicValueEnum::IntValue(self.context.i32_type().const_int(0, false));
-    //     let struct_type = self.context.get_struct_type("Int").unwrap();
-    //     let ptr =
-    //         self.module
-    //             .add_global(struct_type, Some(self.aspace), "_DEFAULT_Int");
-    //     let struct_value = struct_type.const_named_struct(&[zero]);
-    //     ptr.set_initializer(&struct_value);
-
-    //     // Default Bool
-    //     let fls = BasicValueEnum::IntValue(self.context.bool_type().const_int(0, false));
-    //     let struct_type = self.context.get_struct_type("Bool").unwrap();
-    //     let ptr =
-    //         self.module
-    //             .add_global(struct_type, Some(self.aspace), "_DEFAULT_Bool");
-    //     let struct_value = struct_type.const_named_struct(&[fls]);
-    //     ptr.set_initializer(&struct_value);
-
-    //     // Default String
-    //     let zero_len = BasicValueEnum::IntValue(self.context.i32_type().const_int(0, false));
-    //     let empty_string = BasicValueEnum::ArrayValue(self.context.i8_type().const_array(&[]));
-    //     let struct_type = self.context.get_struct_type("String").unwrap();
-    //     let ptr = self.module.add_global(
-    //         struct_type,
-    //         Some(self.aspace),
-    //         "_DEFAULT_String",
-    //     );
-    //     let struct_value = struct_type.const_named_struct(&[zero_len, empty_string]);
-    //     ptr.set_initializer(&struct_value);
-    // }
 
     // Class Initialization functions
 
@@ -296,7 +281,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         for (ind, (_, typ, init)) in attrs {
             let value = if (*init.data == ExprData::NoExpr {}) {
                 if vec!["Int", "Bool", "String"].contains(&typ.as_str()) {
-                    self.code_new(*typ)
+                    self.code_new_and_init(*typ)
                 } else { self.context.ptr_type(self.aspace).const_null()}
                     
             } else {
@@ -338,7 +323,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let entry = self.context.append_basic_block(fn_val, block_name);
         self.builder.position_at_end(entry);
 
-        let main_instance = BasicMetadataValueEnum::PointerValue(self.code_new(sym("Main")));
+        let main_instance = BasicMetadataValueEnum::PointerValue(self.code_new_and_init(sym("Main")));
 
         let main_dot_main = self.module.get_function("Main.main").unwrap();
 
@@ -427,7 +412,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         // Must add self parameter.
         let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
-        all_parameters.append(&mut parameters.to_owned());
+        all_parameters.extend(parameters.to_owned());
 
         let ret_type = self.context.ptr_type(self.aspace);
         let args_types = std::iter::repeat(ret_type)
@@ -473,16 +458,12 @@ impl<'ctx> CodeGenManager<'ctx> {
     // Expr Codegen
 
     fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-        let main_type = self.context.get_struct_type("String").unwrap();
-        let new_ptr = self
-            .builder
-            .build_malloc(main_type, "String_malloc")
-            .unwrap();
-        let str_len = str_array.get_type().len();
+
+        let new_ptr = self.code_new_and_init(sym("String"));
 
         let pointee_ty = self.context.get_struct_type("String").unwrap();
         // set Length
-        let value = self.context.i32_type().const_int(str_len as u64, false);
+        let value = self.context.i32_type().const_int(str_array.get_type().len() as u64, false);
         let field = self
             .builder
             .build_struct_gep(pointee_ty, new_ptr, 0, "gep")
@@ -500,20 +481,18 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
-        let int_type = self.context.get_struct_type("Int").unwrap();
-        let new_ptr = self.builder.build_malloc(int_type, "int_malloc").unwrap();
+        let new_ptr = self.code_new_and_init(sym("Int"));
 
-        // set Length
         let field = self
             .builder
-            .build_struct_gep(int_type, new_ptr, 0, "gep")
+            .build_struct_gep(self.context.get_struct_type("Int").unwrap(), new_ptr, 0, "gep")
             .unwrap();
         self.builder.build_store(field, int_val).unwrap();
 
         new_ptr
     }
 
-    fn code_new(&self, typ: Sym) -> PointerValue<'ctx> {
+    fn code_new_and_init(&self, typ: Sym) -> PointerValue<'ctx> {
         let struct_type = self.context.get_struct_type(typ.as_str()).unwrap();
         let malloc_name = &format!("{}_malloc", typ.as_str());
         let new_ptr = self.builder.build_malloc(struct_type, malloc_name).unwrap();
@@ -551,7 +530,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let new_struct = self.code_new_int(inner);
                 new_struct
             }
-            ExprData::New { typ } => self.code_new(*typ),
+            ExprData::New { typ } => self.code_new_and_init(*typ),
 
             // ExprData::Dispatch {
             //     slf,

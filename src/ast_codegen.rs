@@ -18,6 +18,8 @@ impl Program {
         //
         cgm.code_all_class_structs();
         //
+        // cgm.code_vtables();
+        //
         cgm.register_globals();
         //
         cgm.code_all_inits();
