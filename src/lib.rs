@@ -5,6 +5,7 @@ pub mod ast_codegen;
 pub mod ast_parse;
 pub mod class_table;
 pub mod codegen_manager;
+pub mod codegen_constants;
 pub mod env;
 pub mod semant;
 pub mod symbol;

@@ -14,12 +14,15 @@ use inkwell::values::{
 };
 use inkwell::AddressSpace;
 
+use crate::codegen_constants::*;
+
 pub struct CodeGenManager<'ctx> {
     pub builder: Builder<'ctx>,
     pub module: Module<'ctx>,
     pub context: &'ctx Context,
     pub ct: ClassTable,
     pub variables: HashMap<Sym, PointerValue<'ctx>>,
+    pub aspace: AddressSpace
 }
 
 impl<'ctx> CodeGenManager<'ctx> {
@@ -27,6 +30,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let module = context.create_module("cool_module");
         let builder = context.create_builder();
         let variables = HashMap::<Sym, PointerValue>::new();
+        let aspace = AddressSpace::default();
 
         CodeGenManager {
             builder,
@@ -34,6 +38,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             context,
             ct,
             variables,
+            aspace,
         }
     }
 
@@ -47,22 +52,41 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.context.opaque_struct_type("Bool");
     }
 
+
     fn code_native_class_structs(&self) {
+        // vtable
+        let object_attrs = &[
+            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace))
+            ];
         let typ = self.context.get_struct_type("Object").unwrap();
-        typ.set_body(&[], false);
+        typ.set_body(object_attrs, false);
 
+        // vtable, value
+        let io_attrs = &[
+            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace))
+            ];
         let typ = self.context.get_struct_type("IO").unwrap();
-        typ.set_body(&[], false);
+        typ.set_body(io_attrs, false);
 
-        let int_attrs = &[BasicTypeEnum::IntType(self.context.i32_type())];
+        // vtable, value
+        let int_attrs = &[
+            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace)),
+            BasicTypeEnum::IntType(self.context.i32_type())
+            ];
         let typ = self.context.get_struct_type("Int").unwrap();
         typ.set_body(int_attrs, false);
 
-        let bool_attrs = &[BasicTypeEnum::IntType(self.context.bool_type())];
+        // vtable, value
+        let bool_attrs = &[
+            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace)),
+            BasicTypeEnum::IntType(self.context.bool_type())
+            ];
         let typ = self.context.get_struct_type("Bool").unwrap();
         typ.set_body(bool_attrs, false);
 
+        // vtable, str length, str content
         let string_attrs = &[
+            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace)),
             BasicTypeEnum::StructType(self.context.get_struct_type("Int").unwrap()),
             BasicTypeEnum::ArrayType(self.context.i8_type().array_type(0)),
         ];
@@ -71,7 +95,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn sym_to_llvm_type(&self, typ: Sym) -> BasicTypeEnum {
-        if self.ct.native_classes.contains(&typ) || self.ct.classes.contains(&typ) {
+        if self.ct.native_classes.contains(&typ) || self.ct.program_classes.contains(&typ) {
             return BasicTypeEnum::StructType(
                 self.context
                     .get_struct_type(typ.as_str())
@@ -82,15 +106,17 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_class_struct(&self, name: Sym) {
-        let attr_types_vec: Vec<BasicTypeEnum> = self
+        let mut all_attr_types = vec![BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace))];
+        let mut other_attr_types_vec: Vec<BasicTypeEnum> = self
             .ct
             .get_all_attrs(name)
             .iter()
             .map(|(_name, typ, _)| self.sym_to_llvm_type(*typ))
             .collect();
-        let attr_types = &attr_types_vec[..];
+        // vtable 
+        all_attr_types.append(&mut other_attr_types_vec);
         let typ = self.context.get_struct_type(name.as_str()).unwrap();
-        typ.set_body(attr_types, false);
+        typ.set_body(&all_attr_types, false);
     }
 
     pub fn code_all_class_structs(&self) {
@@ -99,50 +125,57 @@ impl<'ctx> CodeGenManager<'ctx> {
         // Declarations of native class structs...
         self.declare_native_class_struct_types();
         // ...and non-native class structs types.
-        for class in self.ct.classes.iter() {
+        for class in self.ct.program_classes.iter() {
             self.context.opaque_struct_type(class.as_str());
         }
 
         // Coding of native class structs...
         self.code_native_class_structs();
         // ...and non-native class structs types.
-        for class in self.ct.classes.iter() {
+        for class in self.ct.program_classes.iter() {
             self.code_class_struct(*class)
         }
     }
 
     // Global data
     pub fn register_globals(&mut self) {
-        // Default Int
-        let zero = BasicValueEnum::IntValue(self.context.i32_type().const_int(0, false));
-        let struct_type = self.context.get_struct_type("Int").unwrap();
-        let ptr =
-            self.module
-                .add_global(struct_type, Some(AddressSpace::default()), "_DEFAULT_Int");
-        let struct_value = struct_type.const_named_struct(&[zero]);
-        ptr.set_initializer(&struct_value);
-
-        // Default Bool
-        let fls = BasicValueEnum::IntValue(self.context.bool_type().const_int(0, false));
-        let struct_type = self.context.get_struct_type("Bool").unwrap();
-        let ptr =
-            self.module
-                .add_global(struct_type, Some(AddressSpace::default()), "_DEFAULT_Bool");
-        let struct_value = struct_type.const_named_struct(&[fls]);
-        ptr.set_initializer(&struct_value);
-
-        // Default String
-        let zero_len = BasicValueEnum::IntValue(self.context.i32_type().const_int(0, false));
-        let empty_string = BasicValueEnum::ArrayValue(self.context.i8_type().const_array(&[]));
-        let struct_type = self.context.get_struct_type("String").unwrap();
-        let ptr = self.module.add_global(
-            struct_type,
-            Some(AddressSpace::default()),
-            "_DEFAULT_String",
-        );
-        let struct_value = struct_type.const_named_struct(&[zero_len, empty_string]);
-        ptr.set_initializer(&struct_value);
+        // self.register_vtable_pointers();
+        // self.register_default_values();
     }
+
+
+
+    // pub fn register_default_values(&mut self) {
+    //     // Default Int
+    //     let zero = BasicValueEnum::IntValue(self.context.i32_type().const_int(0, false));
+    //     let struct_type = self.context.get_struct_type("Int").unwrap();
+    //     let ptr =
+    //         self.module
+    //             .add_global(struct_type, Some(self.aspace), "_DEFAULT_Int");
+    //     let struct_value = struct_type.const_named_struct(&[zero]);
+    //     ptr.set_initializer(&struct_value);
+
+    //     // Default Bool
+    //     let fls = BasicValueEnum::IntValue(self.context.bool_type().const_int(0, false));
+    //     let struct_type = self.context.get_struct_type("Bool").unwrap();
+    //     let ptr =
+    //         self.module
+    //             .add_global(struct_type, Some(self.aspace), "_DEFAULT_Bool");
+    //     let struct_value = struct_type.const_named_struct(&[fls]);
+    //     ptr.set_initializer(&struct_value);
+
+    //     // Default String
+    //     let zero_len = BasicValueEnum::IntValue(self.context.i32_type().const_int(0, false));
+    //     let empty_string = BasicValueEnum::ArrayValue(self.context.i8_type().const_array(&[]));
+    //     let struct_type = self.context.get_struct_type("String").unwrap();
+    //     let ptr = self.module.add_global(
+    //         struct_type,
+    //         Some(self.aspace),
+    //         "_DEFAULT_String",
+    //     );
+    //     let struct_value = struct_type.const_named_struct(&[zero_len, empty_string]);
+    //     ptr.set_initializer(&struct_value);
+    // }
 
     // Class Initialization functions
 
@@ -157,13 +190,27 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
 
         builder
-            .build_alloca(self.context.ptr_type(AddressSpace::default()), name)
+            .build_alloca(self.context.ptr_type(self.aspace), name)
             .unwrap()
+    }
+
+    fn install_vtable_for_class(&self, name: &str, self_alloca: PointerValue) {
+        let vtable_name = &format!("{}_vtable", name);
+        let ptr = self.module
+            .add_global(self.context.ptr_type(self.aspace), Some(self.aspace), vtable_name);
+
+        let pointee_ty = self.context.get_struct_type(name).unwrap();
+        // vtable
+        let field = self
+        .builder
+        .build_struct_gep(pointee_ty, self_alloca, VTABLE_IND, "gep")
+        .unwrap();
+        self.builder.build_store(field, ptr).unwrap();
     }
 
     fn make_code_init(&self, name: Sym, code_body: fn(&CodeGenManager<'ctx>, &str, PointerValue)) {
         // Takes care of boilerplate function setup and calls `code_body`.
-        let self_type_inner = self.context.ptr_type(AddressSpace::default());
+        let self_type_inner = self.context.ptr_type(self.aspace);
         let self_type = BasicMetadataTypeEnum::PointerType(self_type_inner);
         let return_type = self.context.void_type();
         let fn_type = return_type.fn_type(&[self_type], false);
@@ -177,10 +224,14 @@ impl<'ctx> CodeGenManager<'ctx> {
         let arg_name = "self";
         let self_alloca = self.create_entry_block_alloca(arg_name, fn_val);
         self.builder.build_store(self_alloca, first).unwrap();
+
+        self.install_vtable_for_class(name.as_str(), self_alloca);
         code_body(self, name.as_str(), self_alloca);
         self.builder.build_return(None).unwrap();
         fn_val.verify(false);
     }
+
+
 
     fn code_empty_init_body(&self, _name: &str, _self_alloca: PointerValue) {}
 
@@ -190,7 +241,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let value = self.context.i32_type().const_int(0, false);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, 0, "gep")
+            .build_struct_gep(pointee_ty, self_alloca, INT_VAL_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value).unwrap();
     }
@@ -201,7 +252,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let value = self.context.bool_type().const_int(0, false);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, 0, "gep")
+            .build_struct_gep(pointee_ty, self_alloca, BOOL_VAL_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value).unwrap();
     }
@@ -212,7 +263,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let value = self.context.i32_type().const_int(0, false);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, 0, "gep")
+            .build_struct_gep(pointee_ty, self_alloca, STRING_LEN_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value).unwrap();
 
@@ -221,7 +272,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let value = self.context.i8_type().const_array(&[]);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, 1, "gep")
+            .build_struct_gep(pointee_ty, self_alloca, STRING_CONTENT_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value).unwrap();
     }
@@ -234,17 +285,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.make_code_init(sym("String"), CodeGenManager::code_string_init_body);
     }
 
-    fn default_value_for_type(&self, typ: Sym) -> PointerValue {
-        match typ.as_str() {
-            "Int" | "Bool" | "String" => self
-                .module
-                .get_global(&format!("_DEFAULT_{}", typ.as_str()))
-                .unwrap()
-                .as_pointer_value(),
-            _ => self.context.ptr_type(AddressSpace::default()).const_null(),
-        }
-    }
-
     fn code_init_body(&self, class_name: &str, self_alloca: PointerValue) {
         let attrs = self
             .ct
@@ -255,8 +295,10 @@ impl<'ctx> CodeGenManager<'ctx> {
             .enumerate();
         for (ind, (_, typ, init)) in attrs {
             let value = if (*init.data == ExprData::NoExpr {}) {
-                let inner = self.default_value_for_type(*typ);
-                inner
+                if vec!["Int", "Bool", "String"].contains(&typ.as_str()) {
+                    self.code_new(*typ)
+                } else { self.context.ptr_type(self.aspace).const_null()}
+                    
             } else {
                 self.codegen(init)
             };
@@ -276,7 +318,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     pub fn code_all_inits(&self) {
         self.code_native_inits();
 
-        for class in self.ct.classes.iter() {
+        for class in self.ct.program_classes.iter() {
             self.code_init_for_class(*class);
         }
     }
@@ -314,9 +356,9 @@ impl<'ctx> CodeGenManager<'ctx> {
         // *String
 
         let self_arg_type =
-            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(AddressSpace::default()));
+            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
         let input_arg_type =
-            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(AddressSpace::default()));
+            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
         let fn_type = return_type.fn_type(&[self_arg_type, input_arg_type], false);
         let fn_name = "IO.out_string";
         let fn_val = self.module.add_function(fn_name, fn_type, None);
@@ -349,7 +391,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     fn declare_puts(&self) {
         let input_type =
-            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(AddressSpace::default()));
+            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
         let puts_type = self.context.i32_type().fn_type(&[input_type], false);
         self.module
             .add_function("puts", puts_type, Some(Linkage::External));
@@ -364,7 +406,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     fn code_program_methods(&mut self) {
         // Make sure not to grab methods for native classes.
-        let classes = self.ct.classes.clone();
+        let classes = self.ct.program_classes.clone();
         for cls in classes {
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), body)) in methods.iter() {
@@ -387,7 +429,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
         all_parameters.append(&mut parameters.to_owned());
 
-        let ret_type = self.context.ptr_type(AddressSpace::default());
+        let ret_type = self.context.ptr_type(self.aspace);
         let args_types = std::iter::repeat(ret_type)
             .take(all_parameters.len())
             .map(|f| f.into())
@@ -542,7 +584,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             //         .try_as_basic_value();
             //     match result {
             //         Left(BasicValueEnum::PointerValue(ptr)) => ptr,
-            //         _ => self.context.ptr_type(AddressSpace::default()).const_null(),
+            //         _ => self.context.ptr_type(self.aspace).const_null(),
             //     }
             // }
             ExprData::StaticDispatch {
@@ -572,7 +614,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .try_as_basic_value();
                 match result {
                     Left(BasicValueEnum::PointerValue(ptr)) => ptr,
-                    _ => self.context.ptr_type(AddressSpace::default()).const_null(),
+                    _ => self.context.ptr_type(self.aspace).const_null(),
                 }
             }
 

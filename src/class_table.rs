@@ -8,6 +8,7 @@ use crate::symbol::{sym, Sym};
 
 use common_macros::hash_set;
 
+type ClassesTy = HashSet<Sym>;
 type ClassParentTy = HashMap<Sym, Sym>;
 type ClassChildrenTy = HashMap<Sym, HashSet<Sym>>;
 type Signature = (Formals, Sym);
@@ -15,15 +16,18 @@ type Method = (Signature, Expr);
 type ClassMethodTy = HashMap<Sym, HashMap<Sym, Method>>;
 type AttrTypeInit = (Sym, Sym, Expr);
 type ClassAttrTy = HashMap<Sym, Vec<AttrTypeInit>>;
+type VTableTy = HashMap<Sym, Sym>;
+type ClassVTableTy = HashMap<Sym, VTableTy>;
 
 #[derive(Debug, PartialEq)]
 pub struct ClassTable {
-    pub native_classes: HashSet<Sym>,
-    pub classes: HashSet<Sym>,
+    pub native_classes: ClassesTy,
+    pub program_classes: ClassesTy,
     pub class_parent: ClassParentTy,
     pub class_children: ClassChildrenTy,
     pub class_methods: ClassMethodTy,
     pub class_attrs: ClassAttrTy,
+    pub class_vtable: ClassVTableTy,
 }
 
 impl ClassTable {
@@ -184,24 +188,44 @@ impl ClassTable {
         class_attrs.insert(class.name, attrs);
     }
 
+    fn register_vtable_for_class(
+        cls: Sym,
+        class_parent: &ClassParentTy,
+        class_methods: &ClassMethodTy,
+        class_vtable: &mut ClassVTableTy
+    ) {
+        let mut vtable = HashMap::<Sym, Sym>::new();
+
+        if let Some(parent) = class_parent.get(&cls) {
+            if !class_vtable.contains_key(parent) {
+                ClassTable::register_vtable_for_class(*parent, class_parent, class_methods, class_vtable);
+            }
+            vtable = class_vtable.get(&parent).unwrap().clone();
+        } else {
+            assert!(cls == sym("Object"), "Non-Object class {} has no parent.", cls);
+        }
+
+        // Add methods new to this class.
+        for (method_name, _) in class_methods.get(&cls).unwrap().iter() {
+            vtable.insert(*method_name, cls);
+        }
+        class_vtable.insert(cls, vtable);
+
+    }
+
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
         let mut class_parent = HashMap::<Sym, Sym>::new();
         let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
         let mut class_attrs = HashMap::<Sym, Vec<AttrTypeInit>>::new();
         let mut class_methods = HashMap::<Sym, HashMap<Sym, Method>>::new();
 
-        let native_classes = ClassTable::create_native_classes();
-        for class in native_classes.iter() {
-            ClassTable::register_attrs_methods_and_relatives(
-                class,
-                &mut class_methods,
-                &mut class_attrs,
-                &mut class_parent,
-                &mut class_children,
-            );
-        }
 
-        for class in classes.iter() {
+        let program_classes = classes.to_owned();
+        let native_classes = ClassTable::create_native_classes();
+        let mut all_classes = native_classes.clone();
+        all_classes.extend_from_slice(&program_classes[..]);
+
+        for class in all_classes.iter() {
             ClassTable::register_attrs_methods_and_relatives(
                 class,
                 &mut class_methods,
@@ -213,16 +237,25 @@ impl ClassTable {
 
         ClassTable::detect_cycles(&class_children)?;
 
+        let all_class_names: ClassesTy = all_classes.iter().map(|cls| cls.name).collect();
+        let program_class_names: ClassesTy = program_classes.iter().map(|cls| cls.name).collect();
+        let native_class_names : ClassesTy = native_classes.iter().map(|cls| cls.name).collect();
+
+
+        let mut class_vtable = HashMap::<Sym, HashMap<Sym, Sym>>::new();
+        for cls in all_class_names.iter() {
+            ClassTable::register_vtable_for_class(*cls, &class_parent, &class_methods, &mut class_vtable);
+        }
+
         //let native_class_names = native_classes.map
-        let class_names = classes.iter().map(|cls| cls.name).collect();
-        let native_class_names = native_classes.iter().map(|cls| cls.name).collect();
         Ok(ClassTable {
-            native_classes: native_class_names,
-            classes: class_names,
+            native_classes : native_class_names,
+            program_classes : program_class_names,
             class_parent,
             class_children,
             class_methods,
             class_attrs,
+            class_vtable,
         })
     }
 
@@ -393,18 +426,23 @@ mod class_table_tests {
     #[test]
     fn test_constructor() {
         let code: &str = r"
-        class Apple {a: Int <- 2 + 3;};
+        class Apple {
+            a: Int <- 2 + 3;
+            foo(): T2 {41};
+        };
         class Orange inherits Apple {
             b: Apple;
             foo() : T2 {42};
             bar(c: S1, d: S2) : S3 {true};
         };
         ";
+
+
         let program = Program::parse(code).unwrap();
 
         let result = ClassTable::new(&program.classes).unwrap();
 
-        let desired_classes = hash_set! {
+        let desired_program_classes = hash_set! {
             sym("Apple"),
             sym("Orange"),
         };
@@ -463,7 +501,9 @@ mod class_table_tests {
             sym("Bool") => hash_map!{},
             sym("Int") => hash_map!{},
 
-            sym("Apple") => hash_map!{},
+            sym("Apple") => hash_map!{
+                sym("foo") => ((vec![], sym("T2")), Expr::int_const("41")),
+            },
             sym("Orange") => hash_map!{
                 sym("foo") => ((vec![], sym("T2")), Expr::int_const("42")),
                 sym("bar") => ((vec![Formal::formal("c", "S1"), Formal::formal("d", "S2")], sym("S3")), Expr::bool_const(true)),
@@ -482,12 +522,63 @@ mod class_table_tests {
             sym("Orange")=>vec![(sym("b"), sym("Apple"), Expr::no_expr())],
         };
 
-        assert_eq!(result.classes, desired_classes);
+        let desired_class_vtable = hash_map!(
+            sym("Object") => hash_map!(
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Object"),
+                sym("copy") => sym("Object"),
+            ),
+            sym("IO") => hash_map!(
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Object"),
+                sym("copy") => sym("Object"),
+                sym("out_string") => sym("IO"),
+                sym("in_string") => sym("IO"),
+                sym("out_int") => sym("IO"),
+                sym("in_int") => sym("IO"),
+            ),
+            sym("String") => hash_map!(
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Object"),
+                sym("copy") => sym("Object"),
+                sym("length") => sym("String"),
+                sym("concat") => sym("String"),
+                sym("substr") => sym("String"),
+            ),
+            sym("Bool") => hash_map!(
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Object"),
+                sym("copy") => sym("Object"),
+            ),
+            sym("Int") => hash_map!(
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Object"),
+                sym("copy") => sym("Object"),
+            ),
+            sym("Apple") => hash_map!(
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Object"),
+                sym("copy") => sym("Object"),
+                sym("foo") => sym("Apple"),
+            ),
+            sym("Orange") => hash_map!(
+                sym("abort") => sym("Object"),
+                sym("type_name") => sym("Object"),
+                sym("copy") => sym("Object"),
+                sym("foo") => sym("Orange"),
+                sym("bar") => sym("Orange"),
+            ),
+
+        );
+
+        assert_eq!(result.program_classes, desired_program_classes);
         assert_eq!(result.native_classes, desired_native_classes);
         assert_eq!(result.class_parent, desired_class_parent);
         assert_eq!(result.class_children, desired_class_children);
         assert_eq!(result.class_methods, desired_class_methods);
         assert_eq!(result.class_attrs, desired_class_attrs);
+        assert_eq!(result.class_vtable, desired_class_vtable);
+
     }
 
     #[test]
