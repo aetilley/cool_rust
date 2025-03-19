@@ -244,6 +244,14 @@ impl ClassTable {
         class_method_order.insert(cls, method_order);
     }
 
+    pub fn get_max_vtable_size(&self) -> usize {
+        self.class_vtable
+            .values()
+            .map(|vtable| vtable.len())
+            .max()
+            .unwrap()
+    }
+
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
         let mut class_parent = HashMap::<Sym, Sym>::new();
         let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();

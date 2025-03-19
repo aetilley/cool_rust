@@ -8,7 +8,7 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Linkage;
 use inkwell::module::Module;
-use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum, FunctionType};
 use inkwell::values::{
     ArrayValue, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
 };
@@ -140,43 +140,35 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // Code function stubs.
 
-    pub fn code_all_method_stubs(&mut self) {
+    pub fn code_all_method_declarations(&mut self) {
         let classes = self.ct.program_classes.clone();
         for cls in classes {
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_stub(cls, *method, parameters, *return_type);
+                self.code_method_declaration(cls, *method, parameters, *return_type);
             }
         }
         let native_classes = self.ct.native_classes.clone();
         for cls in native_classes {
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_stub(cls, *method, parameters, *return_type);
+                self.code_method_declaration(cls, *method, parameters, *return_type);
             }
         }
     }
 
-    fn code_method_stub(
+    fn code_method_declaration(
         &mut self,
         cls: Sym,
         method: Sym,
         parameters: &[Formal],
-        _return_type: Sym,
+        return_type: Sym,
     ) {
-        // TODO! Currently ignoring the types of args / return and treating them as generic pointers.
-
         // Must add self parameter.
         let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
         all_parameters.extend(parameters.to_owned());
 
-        let ret_type = self.context.ptr_type(self.aspace);
-        let args_types = std::iter::repeat(ret_type)
-            .take(all_parameters.len())
-            .map(|f| f.into())
-            .collect::<Vec<BasicMetadataTypeEnum>>();
-
-        let fn_type = ret_type.fn_type(&args_types[..], false);
+        let fn_type = self.get_function_type_from_signature(&all_parameters, return_type);
         let fn_name = format!("{}.{}", cls, method);
         let fn_val = self.module.add_function(&fn_name, fn_type, None);
 
@@ -187,21 +179,31 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
+    fn get_function_type_from_signature(
+        &self,
+        parameters: &[Formal],
+        _return_type: Sym,
+    ) -> FunctionType<'ctx> {
+        // TODO! Currently ignoring the types of args / return and treating them as generic pointers.
+        let ret_type = self.context.ptr_type(self.aspace);
+        let args_types = std::iter::repeat(ret_type)
+            .take(parameters.len())
+            .map(|f| f.into())
+            .collect::<Vec<BasicMetadataTypeEnum>>();
+
+        let fn_type = ret_type.fn_type(&args_types[..], false);
+        fn_type
+    }
+
     //
     //
     // VTables
 
-    fn code_vtable_for_class(&mut self, cls: Sym) {
-        let method_order = self.ct.class_method_order.get(&cls).unwrap();
-        let table_size: u32 = method_order.len().try_into().unwrap();
-        let vtable_name = &format!("{}_vtable", cls);
-        let vtable_global = self.module.add_global(
-            self.context.ptr_type(self.aspace).array_type(table_size),
-            Some(self.aspace),
-            vtable_name,
-        );
+    fn code_vtable_array_for_class(&self, cls: Sym) -> ArrayValue<'ctx> {
+        let table_size: usize = self.ct.get_max_vtable_size();
 
-        let mut initializer_array = vec![];
+        let mut initializer_fields = vec![];
+        let method_order = self.ct.class_method_order.get(&cls).unwrap();
         let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
         for method_name in method_order.iter() {
             let resolution_class = vtable_map.get(method_name).unwrap();
@@ -211,24 +213,38 @@ impl<'ctx> CodeGenManager<'ctx> {
                 .get_function(&fn_name)
                 .unwrap_or_else(|| panic!("No function {}", fn_name));
             let ptr_val = fn_val.as_global_value().as_pointer_value();
-            initializer_array.push(ptr_val);
+            initializer_fields.push(ptr_val);
         }
-        let init_array_value = self
-            .context
-            .ptr_type(self.aspace)
-            .const_array(&initializer_array[..]);
+        // Pad out the fields.
+        while initializer_fields.len() < table_size {
+            initializer_fields.push(self.context.ptr_type(self.aspace).const_null())
+        }
 
-        vtable_global.set_initializer(&init_array_value);
+        self.context
+            .ptr_type(self.aspace)
+            .const_array(&initializer_fields[..])
+    }
+
+    fn code_vtable_global_for_class(&mut self, cls: Sym) {
+        let initializer = self.code_vtable_array_for_class(cls);
+
+        let vtable_name = &format!("{}_vtable", cls);
+
+        let vtable_global =
+            self.module
+                .add_global(initializer.get_type(), Some(self.aspace), vtable_name);
+
+        vtable_global.set_initializer(&initializer);
     }
 
     pub fn code_vtables(&mut self) {
         let natives_classes = self.ct.native_classes.clone();
         for cls in natives_classes.iter() {
-            self.code_vtable_for_class(*cls);
+            self.code_vtable_global_for_class(*cls);
         }
         let program_classes = self.ct.program_classes.clone();
         for cls in program_classes.iter() {
-            self.code_vtable_for_class(*cls);
+            self.code_vtable_global_for_class(*cls);
         }
     }
 
@@ -267,23 +283,28 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.position_at_end(entry);
 
         let first = fn_val.get_first_param().unwrap();
-        let arg_name = "self";
-        let self_alloca = self.create_entry_block_alloca(arg_name, fn_val);
-        self.builder.build_store(self_alloca, first).unwrap();
+        // let arg_name = "self";
+        // let self_alloca = self.create_entry_block_alloca(arg_name, fn_val);
+        // self.builder.build_store(self_alloca, first).unwrap();
+        let self_ptr = first.into_pointer_value();
 
         // Install Vtable
         let vtable_name = &format!("{}_vtable", name);
-        let ptr = self.module.get_global(vtable_name).unwrap();
+        let ptr = self
+            .module
+            .get_global(vtable_name)
+            .unwrap()
+            .as_pointer_value();
 
         let pointee_ty = self.context.get_struct_type(&name).unwrap();
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, VTABLE_IND, "gep")
+            .build_struct_gep(pointee_ty, self_ptr, VTABLE_IND, "gep")
             .unwrap();
         self.builder.build_store(field, ptr).unwrap();
 
         // Code Body
-        code_body(self, name.as_str(), self_alloca);
+        code_body(self, name.as_str(), self_ptr);
         self.builder.build_return(None).unwrap();
         fn_val.verify(false);
     }
@@ -448,11 +469,25 @@ impl<'ctx> CodeGenManager<'ctx> {
         fn_val.verify(true);
     }
 
-    fn code_native_method_bodies(&self) {
+    fn code_native_method_bodies(&mut self) {
         self.declare_puts();
         self.code_io_out_string();
-        // TODO
-        // self.code_io_out_int();
+        // TEMPORARY!  Just so we can run our program.
+        let skip_list = vec![sym("out_string")];
+        self.code_native_method_stubs(skip_list);
+    }
+
+    fn code_native_method_stubs(&mut self, skip_list: Vec<Sym>) {
+        let native_classes = self.ct.native_classes.clone();
+        let stub = &Expr::no_expr();
+        for cls in native_classes {
+            let methods = self.ct.class_methods.get(&cls).unwrap().clone();
+            for (method_name, ((parameters, return_type), _)) in methods.iter() {
+                if !skip_list.contains(method_name) {
+                    self.code_method_body(cls, *method_name, parameters, *return_type, stub);
+                }
+            }
+        }
     }
 
     fn code_program_method_bodies(&mut self) {
@@ -568,6 +603,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     pub fn codegen(&self, expr: &Expr) -> PointerValue {
         let data = &*expr.data;
         match data {
+            ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
             ExprData::StrConst { val } => {
                 let array_values: Vec<IntValue> = val
                     .as_bytes()
@@ -588,40 +624,101 @@ impl<'ctx> CodeGenManager<'ctx> {
             }
             ExprData::New { typ } => self.code_new_and_init(*typ),
 
-            // ExprData::Dispatch {
-            //     slf,
-            //     method_name,
-            //     args,
-            // } => {
-            //     let slf_arg = self.codegen(slf);
-            //     // The following uses the static type not the dynamic type,
-            //     // but the desired function will have the same tag in the vtable
-            //     // for all subtypes.
-            //     let vtable_key = class_method_tags(expr.stype, method_name);
-            //     let fn_name = slf_arg.vtable.get(vtable_key)
+            ExprData::Dispatch {
+                slf,
+                method_name,
+                args,
+            } => {
+                let slf_arg = self.codegen(slf);
 
-            //     let mut compiled_args: Vec<PointerValue> = vec![slf_arg];
-            //     for arg in args.iter() {
-            //         let compiled_arg = self.codegen(arg);
-            //         compiled_args.push(compiled_arg);
-            //     }
+                // The following uses the static type not the dynamic type,
+                // but the desired function will have the same tag in the vtable
+                // for all subtypes, and the same function signature.
+                let static_type = slf.stype;
 
-            //     let fn_val = self.module.get_function(fn_name).unwrap();
-            //     let md_args: Vec<BasicMetadataValueEnum> = compiled_args
-            //         .into_iter()
-            //         .map(|ptr| BasicMetadataValueEnum::PointerValue(ptr))
-            //         .collect();
-            //     let call_name = &format!("{}_call", fn_name);
-            //     let result = self
-            //         .builder
-            //         .build_call(fn_val, &md_args[..], call_name)
-            //         .unwrap()
-            //         .try_as_basic_value();
-            //     match result {
-            //         Left(BasicValueEnum::PointerValue(ptr)) => ptr,
-            //         _ => self.context.ptr_type(self.aspace).const_null(),
-            //     }
-            // }
+                let vtable_offset: u32 = self
+                    .ct
+                    .class_method_order
+                    .get(&static_type)
+                    .unwrap()
+                    .iter()
+                    .position(|&r| r == *method_name)
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+
+                // Note we are guaranteed that the initial segment
+                // of the struct will be the layout of static_type.
+                // In fact we only need the first field which is the same in all
+                // classes.
+                let pointee_ty = self.context.get_struct_type(&static_type).unwrap();
+                let vtable_pointer_field = self
+                    .builder
+                    .build_struct_gep(pointee_ty, slf_arg, VTABLE_IND, "get_vtable_pointer_field")
+                    .unwrap();
+
+                let vtable_pointer = self
+                    .builder
+                    .build_load(
+                        self.context.ptr_type(self.aspace),
+                        vtable_pointer_field,
+                        "get vtable pointer",
+                    )
+                    .unwrap()
+                    .into_pointer_value();
+
+                let vtable_type = self
+                    .context
+                    .ptr_type(self.aspace)
+                    .array_type(self.ct.get_max_vtable_size().try_into().unwrap());
+
+                let vtable_array = self
+                    .builder
+                    .build_load(vtable_type, vtable_pointer, "load vtable")
+                    .unwrap()
+                    .into_array_value();
+
+                let method_pointer = self
+                    .builder
+                    .build_extract_value(vtable_array, vtable_offset, "extract method from vtable")
+                    .unwrap()
+                    .into_pointer_value();
+
+                // Compile the arguments.
+                let ((parameters, return_type), _) =
+                    self.ct.get_method(static_type, *method_name).unwrap();
+
+                let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
+                all_parameters.extend(parameters.to_owned());
+                let fn_type =
+                    self.get_function_type_from_signature(&all_parameters[..], return_type);
+
+                let fn_name = &method_ref(sym("<Dynamic>"), *method_name);
+
+                let mut compiled_args: Vec<PointerValue> = vec![slf_arg];
+                for arg in args.iter() {
+                    let compiled_arg = self.codegen(arg);
+                    compiled_args.push(compiled_arg);
+                }
+                let md_args: Vec<BasicMetadataValueEnum> = compiled_args
+                    .into_iter()
+                    .map(BasicMetadataValueEnum::PointerValue)
+                    .collect();
+                let call_name = &format!("{}_call", fn_name);
+
+                // Call the function.
+                let result = self
+                    .builder
+                    .build_indirect_call(fn_type, method_pointer, &md_args, call_name)
+                    .unwrap()
+                    .try_as_basic_value();
+
+                match result {
+                    Left(BasicValueEnum::PointerValue(ptr)) => ptr,
+                    _ => self.context.ptr_type(self.aspace).const_null(),
+                }
+            }
+
             ExprData::StaticDispatch {
                 typ,
                 method_name,
@@ -634,14 +731,14 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let compiled_arg = self.codegen(arg);
                     compiled_args.push(compiled_arg);
                 }
-                // TODO: should really get these strings programmatically E.g "get_method_ref(class, method_name)"
-                let fn_name = &format!("{}.{}", typ, method_name);
+                let fn_name = &method_ref(*typ, *method_name);
                 let fn_val = self.module.get_function(fn_name).unwrap();
                 let md_args: Vec<BasicMetadataValueEnum> = compiled_args
                     .into_iter()
                     .map(BasicMetadataValueEnum::PointerValue)
                     .collect();
                 let call_name = &format!("{}_call", fn_name);
+
                 let result = self
                     .builder
                     .build_call(fn_val, &md_args[..], call_name)
@@ -658,11 +755,8 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 }
 
-
-
-
 impl Program {
-    pub fn to_llvm(&self) {
+    pub fn to_llvm(&self, out_file: &str) {
         let context = Context::create();
         let ct = ClassTable::new(&self.classes).expect(
             "Failure to construct ClassTable \
@@ -671,11 +765,9 @@ impl Program {
         );
         let mut cgm = CodeGenManager::init(&context, ct);
         //
-        // println!("{:?}", serde_json::to_string(ustr::cache()).unwrap());
-        //
         cgm.code_all_class_structs();
         //
-        cgm.code_all_method_stubs();
+        cgm.code_all_method_declarations();
         //
         cgm.code_vtables();
         //
@@ -687,7 +779,8 @@ impl Program {
         //
         cgm.code_main();
         //
-        cgm.module.verify().unwrap();
-        cgm.module.print_to_file("out.ll").unwrap();
+        // cgm.module.verify().unwrap();
+
+        cgm.module.print_to_file(out_file).unwrap();
     }
 }

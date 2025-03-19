@@ -5,7 +5,6 @@ use std::path::Path;
 
 use cool_rust::ast::Program;
 use cool_rust::ast_parse::Parse;
-//use cool_rust::ast_codegen::compile;
 
 fn main() {
     let user_args: Vec<String> = env::args().collect();
@@ -22,20 +21,13 @@ fn main() {
         panic!("couldn't read {}: {}", display, why);
     }
 
-    //Tokenize (TODO:  Create a flag to trigger this only.)
-    // use cool_rust::token::{Token, tokenize_all};
-    // let result: Vec::<Token> = tokenize_all(&code);
-    // for token in result {
-    //     print!("{}\n", token);
-    // }
-
-    // Parse
+    // Tokenize and Parse
     let mut program: Program = Program::parse(&code).expect("Main program did not parse");
 
+    // Semantic analysis.
     program.semant().expect("Program did not typecheck");
 
-    // println!("{:#?}", program)
-
-    // print to out.ll
-    program.to_llvm();
+    // Codegen
+    let out_file = &format!("{}.ll", path.file_stem().unwrap().to_str().unwrap());
+    program.to_llvm(out_file);
 }

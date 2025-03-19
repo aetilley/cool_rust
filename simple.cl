@@ -15,7 +15,7 @@ class Banana {
 };
 
 class Main {
-    main() : Object {(new IO)@IO.out_string("Buenos Dias, Mundo.")};
+    main() : Object {(new IO).out_string("Hello world!")};
 
 
 };
