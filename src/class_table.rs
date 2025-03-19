@@ -12,14 +12,14 @@ type ClassesTy = HashSet<Sym>;
 type ClassParentTy = HashMap<Sym, Sym>;
 type ClassChildrenTy = HashMap<Sym, HashSet<Sym>>;
 type Signature = (Formals, Sym);
-type Method = (Signature, Expr);
-type ClassMethodTy = HashMap<Sym, HashMap<Sym, Method>>;
+type MethodTy = (Signature, Expr);
+type ClassMethodTy = HashMap<Sym, HashMap<Sym, MethodTy>>;
 type AttrTypeInit = (Sym, Sym, Expr);
 type ClassAttrTy = HashMap<Sym, Vec<AttrTypeInit>>;
 type VTableTy = HashMap<Sym, Sym>;
 type ClassVTableTy = HashMap<Sym, VTableTy>;
-type MethodOffsetTy = HashMap<Sym, usize>;
-type ClassMethodOffsetTy = HashMap<Sym, MethodOffsetTy>;
+type MethodOrderTy = Vec<Sym>;
+type ClassMethodOrderTy = HashMap<Sym, MethodOrderTy>;
 
 #[derive(Debug, PartialEq)]
 pub struct ClassTable {
@@ -30,7 +30,7 @@ pub struct ClassTable {
     pub class_methods: ClassMethodTy,
     pub class_attrs: ClassAttrTy,
     pub class_vtable: ClassVTableTy,
-    pub class_method_offset: ClassMethodOffsetTy,
+    pub class_method_order: ClassMethodOrderTy,
 }
 
 impl ClassTable {
@@ -167,7 +167,7 @@ impl ClassTable {
         }
 
         let mut attrs = Vec::<AttrTypeInit>::new();
-        let mut methods = HashMap::<Sym, Method>::new();
+        let mut methods = HashMap::<Sym, MethodTy>::new();
 
         for feature in class.features.iter() {
             match feature {
@@ -196,10 +196,10 @@ impl ClassTable {
         class_parent: &ClassParentTy,
         class_methods: &ClassMethodTy,
         class_vtable: &mut ClassVTableTy,
-        class_method_offset: &mut ClassMethodOffsetTy,
+        class_method_order: &mut ClassMethodOrderTy,
     ) {
         let mut vtable = HashMap::<Sym, Sym>::new();
-        let mut method_offset = HashMap::<Sym, usize>::new();
+        let mut method_order = Vec::<Sym>::new();
 
         // First add all methods for parent.
         if let Some(parent) = class_parent.get(&cls) {
@@ -209,11 +209,11 @@ impl ClassTable {
                     class_parent,
                     class_methods,
                     class_vtable,
-                    class_method_offset,
+                    class_method_order,
                 );
             }
-            vtable = class_vtable.get(&parent).unwrap().clone();
-            method_offset = class_method_offset.get(&parent).unwrap().clone();
+            vtable = class_vtable.get(parent).unwrap().clone();
+            method_order = class_method_order.get(parent).unwrap().clone();
         } else {
             assert!(
                 cls == sym("Object"),
@@ -222,31 +222,33 @@ impl ClassTable {
             );
         }
 
-        let mut next = method_offset.len();
         // Then add methods new to this class:
         // Sorting will make testing simpler.
         let methods = sorted(class_methods.get(&cls).unwrap().keys());
         for method_name in methods {
             vtable.insert(*method_name, cls);
 
-            if method_offset.contains_key(method_name) {
+            if method_order.contains(method_name) {
                 // Override parent, use same offset.
-                method_offset.insert(*method_name, *method_offset.get(method_name).unwrap());
+                let old_index = method_order
+                    .iter()
+                    .position(|&r| r == *method_name)
+                    .unwrap();
+                method_order[old_index] = *method_name;
             } else {
                 // New function name.
-                method_offset.insert(*method_name, next);
-                next = next + 1;
+                method_order.push(*method_name);
             }
         }
         class_vtable.insert(cls, vtable);
-        class_method_offset.insert(cls, method_offset);
+        class_method_order.insert(cls, method_order);
     }
 
     pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
         let mut class_parent = HashMap::<Sym, Sym>::new();
         let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
         let mut class_attrs = HashMap::<Sym, Vec<AttrTypeInit>>::new();
-        let mut class_methods = HashMap::<Sym, HashMap<Sym, Method>>::new();
+        let mut class_methods = HashMap::<Sym, HashMap<Sym, MethodTy>>::new();
 
         let program_classes = classes.to_owned();
         let native_classes = ClassTable::create_native_classes();
@@ -269,8 +271,8 @@ impl ClassTable {
         let program_class_names: ClassesTy = program_classes.iter().map(|cls| cls.name).collect();
         let native_class_names: ClassesTy = native_classes.iter().map(|cls| cls.name).collect();
 
-        let mut class_vtable = HashMap::<Sym, HashMap<Sym, Sym>>::new();
-        let mut class_method_offset = HashMap::<Sym, HashMap<Sym, usize>>::new();
+        let mut class_vtable = HashMap::<Sym, VTableTy>::new();
+        let mut class_method_order = HashMap::<Sym, MethodOrderTy>::new();
 
         for cls in all_class_names.iter() {
             ClassTable::register_vtable_and_method_offsets_for_class(
@@ -278,7 +280,7 @@ impl ClassTable {
                 &class_parent,
                 &class_methods,
                 &mut class_vtable,
-                &mut class_method_offset,
+                &mut class_method_order,
             );
         }
 
@@ -291,7 +293,7 @@ impl ClassTable {
             class_methods,
             class_attrs,
             class_vtable,
-            class_method_offset,
+            class_method_order,
         })
     }
 
@@ -311,7 +313,7 @@ impl ClassTable {
         &self,
         class_name: Sym,
         method_name: Sym,
-    ) -> Result<Method, SemanticAnalysisError> {
+    ) -> Result<MethodTy, SemanticAnalysisError> {
         match self.class_methods.get(&class_name) {
             None => {
                 let msg = format!("No methods found for class {}.", class_name);
@@ -331,7 +333,7 @@ impl ClassTable {
         &self,
         class_name: Sym,
         method_name: Sym,
-    ) -> Result<Method, SemanticAnalysisError> {
+    ) -> Result<MethodTy, SemanticAnalysisError> {
         if let Ok(method) = self.get_method(class_name, method_name) {
             return Ok(method);
         }
@@ -606,53 +608,14 @@ mod class_table_tests {
 
         );
 
-        let desired_class_method_offset = hash_map!(
-            sym("Object") => hash_map!(
-                sym("abort") => 0,
-                sym("copy") => 1,
-                sym("type_name") => 2,
-            ),
-            sym("IO") => hash_map!(
-                sym("abort") => 0,
-                sym("copy") => 1,
-                sym("type_name") => 2,
-                sym("in_int") => 3,
-                sym("in_string") => 4,
-                sym("out_int") => 5,
-                sym("out_string") => 6,
-            ),
-            sym("String") => hash_map!(
-                sym("abort") => 0,
-                sym("copy") => 1,
-                sym("type_name") => 2,
-                sym("concat") => 3,
-                sym("length") => 4,
-                sym("substr") => 5,
-            ),
-            sym("Bool") => hash_map!(
-                sym("abort") => 0,
-                sym("copy") => 1,
-                sym("type_name") => 2,
-            ),
-            sym("Int") => hash_map!(
-                sym("abort") => 0,
-                sym("copy") => 1,
-                sym("type_name") => 2,
-            ),
-            sym("Apple") => hash_map!(
-                sym("abort") => 0,
-                sym("copy") => 1,
-                sym("type_name") => 2,
-                sym("foo") => 3,
-            ),
-            sym("Orange") => hash_map!(
-                sym("abort") => 0,
-                sym("copy") => 1,
-                sym("type_name") => 2,
-                sym("foo") => 3,
-                sym("bar") => 4,
-            ),
-
+        let desired_class_method_order = hash_map!(
+            sym("Object") => vec![sym("abort"), sym("copy"), sym("type_name")],
+            sym("IO") => vec![sym("abort"), sym("copy"), sym("type_name"), sym("in_int"), sym("in_string"), sym("out_int"), sym("out_string")],
+            sym("Bool") => vec![sym("abort"), sym("copy"), sym("type_name")],
+            sym("Int") => vec![sym("abort"), sym("copy"), sym("type_name")],
+            sym("String") => vec![sym("abort"), sym("copy"), sym("type_name"), sym("concat"), sym("length"), sym("substr")],
+            sym("Apple") => vec![sym("abort"), sym("copy"), sym("type_name"), sym("foo")],
+            sym("Orange") => vec![sym("abort"), sym("copy"), sym("type_name"), sym("foo"), sym("bar")],
         );
 
         assert_eq!(result.program_classes, desired_program_classes);
@@ -662,7 +625,8 @@ mod class_table_tests {
         assert_eq!(result.class_methods, desired_class_methods);
         assert_eq!(result.class_attrs, desired_class_attrs);
         assert_eq!(result.class_vtable, desired_class_vtable);
-        assert_eq!(result.class_method_offset, desired_class_method_offset);
+
+        assert_eq!(result.class_method_order, desired_class_method_order);
     }
 
     #[test]

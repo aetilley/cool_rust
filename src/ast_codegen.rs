@@ -18,13 +18,15 @@ impl Program {
         //
         cgm.code_all_class_structs();
         //
-        // cgm.code_vtables();
+        cgm.code_all_method_stubs();
+        //
+        cgm.code_vtables();
         //
         cgm.register_globals();
         //
         cgm.code_all_inits();
         //
-        cgm.code_all_methods();
+        //cgm.code_all_methods();
         //
         cgm.module.verify().unwrap();
         cgm.module.print_to_file("out.ll").unwrap();

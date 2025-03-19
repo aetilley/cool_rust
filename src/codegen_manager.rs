@@ -22,7 +22,7 @@ pub struct CodeGenManager<'ctx> {
     pub context: &'ctx Context,
     pub ct: ClassTable,
     pub variables: HashMap<Sym, PointerValue<'ctx>>,
-    pub aspace: AddressSpace
+    pub aspace: AddressSpace,
 }
 
 impl<'ctx> CodeGenManager<'ctx> {
@@ -52,35 +52,34 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.context.opaque_struct_type("Bool");
     }
 
-
     fn code_native_class_structs(&self) {
         // vtable
-        let object_attrs = &[
-            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace))
-            ];
+        let object_attrs = &[BasicTypeEnum::PointerType(
+            self.context.ptr_type(self.aspace),
+        )];
         let typ = self.context.get_struct_type("Object").unwrap();
         typ.set_body(object_attrs, false);
 
         // vtable, value
-        let io_attrs = &[
-            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace))
-            ];
+        let io_attrs = &[BasicTypeEnum::PointerType(
+            self.context.ptr_type(self.aspace),
+        )];
         let typ = self.context.get_struct_type("IO").unwrap();
         typ.set_body(io_attrs, false);
 
         // vtable, value
         let int_attrs = &[
             BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace)),
-            BasicTypeEnum::IntType(self.context.i32_type())
-            ];
+            BasicTypeEnum::IntType(self.context.i32_type()),
+        ];
         let typ = self.context.get_struct_type("Int").unwrap();
         typ.set_body(int_attrs, false);
 
         // vtable, value
         let bool_attrs = &[
             BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace)),
-            BasicTypeEnum::IntType(self.context.bool_type())
-            ];
+            BasicTypeEnum::IntType(self.context.bool_type()),
+        ];
         let typ = self.context.get_struct_type("Bool").unwrap();
         typ.set_body(bool_attrs, false);
 
@@ -106,14 +105,16 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_class_struct(&self, name: Sym) {
-        let mut all_attr_types = vec![BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace))];
-        let mut other_attr_types_vec: Vec<BasicTypeEnum> = self
+        let mut all_attr_types = vec![BasicTypeEnum::PointerType(
+            self.context.ptr_type(self.aspace),
+        )];
+        let other_attr_types_vec: Vec<BasicTypeEnum> = self
             .ct
             .get_all_attrs(name)
             .iter()
             .map(|(_name, typ, _)| self.sym_to_llvm_type(*typ))
             .collect();
-        // vtable 
+        // vtable
         all_attr_types.extend(other_attr_types_vec);
         let typ = self.context.get_struct_type(name.as_str()).unwrap();
         typ.set_body(&all_attr_types, false);
@@ -137,30 +138,102 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
+    // Code function stubs.
+
+    pub fn code_all_method_stubs(&mut self) {
+        let classes = self.ct.program_classes.clone();
+        for cls in classes {
+            let methods = self.ct.class_methods.get(&cls).unwrap().clone();
+            for (method, ((parameters, return_type), _)) in methods.iter() {
+                self.code_method_stub(cls, *method, parameters, *return_type);
+            }
+        }
+        let native_classes = self.ct.native_classes.clone();
+        for cls in native_classes {
+            let methods = self.ct.class_methods.get(&cls).unwrap().clone();
+            for (method, ((parameters, return_type), _)) in methods.iter() {
+                self.code_method_stub(cls, *method, parameters, *return_type);
+            }
+        }
+    }
+
+    fn code_method_stub(
+        &mut self,
+        cls: Sym,
+        method: Sym,
+        parameters: &[Formal],
+        _return_type: Sym,
+    ) {
+        // TODO! Currently ignoring the types of args / return and treating them as generic pointers.
+
+        // Must add self parameter.
+        let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
+        all_parameters.extend(parameters.to_owned());
+
+        let ret_type = self.context.ptr_type(self.aspace);
+        let args_types = std::iter::repeat(ret_type)
+            .take(all_parameters.len())
+            .map(|f| f.into())
+            .collect::<Vec<BasicMetadataTypeEnum>>();
+
+        let fn_type = ret_type.fn_type(&args_types[..], false);
+        let fn_name = format!("{}.{}", cls, method);
+        let fn_val = self.module.add_function(&fn_name, fn_type, None);
+
+        // set arguments names
+        for (i, arg) in fn_val.get_param_iter().enumerate() {
+            arg.into_pointer_value()
+                .set_name(all_parameters[i].name.as_str());
+        }
+    }
 
     // VTables
-    // fn code_vtable_for_class(&mut self, cls: Sym) {
-    //     let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
+    fn code_vtable_for_class(&mut self, cls: Sym) {
+        let method_order = self.ct.class_method_order.get(&cls).unwrap();
+        let table_size: u32 = method_order.len().try_into().unwrap();
+        let vtable_name = &format!("{}_vtable", cls);
+        let vtable_global = self.module.add_global(
+            self.context.ptr_type(self.aspace).array_type(table_size),
+            Some(self.aspace),
+            vtable_name,
+        );
 
+        let mut initializer_array = vec![];
+        let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
+        for method_name in method_order.iter() {
+            let resolution_class = vtable_map.get(method_name).unwrap();
+            let fn_name = method_ref(*resolution_class, *method_name);
+            let fn_val = self
+                .module
+                .get_function(&fn_name)
+                .unwrap_or_else(|| panic!("No function {}", fn_name));
+            let ptr_val = fn_val.as_global_value().as_pointer_value();
+            initializer_array.push(ptr_val);
+        }
+        let init_array_value = self
+            .context
+            .ptr_type(self.aspace)
+            .const_array(&initializer_array[..]);
 
+        vtable_global.set_initializer(&init_array_value);
+    }
 
-    // }
-
-    // pub fn code_vtables(&mut self) {
-    //     for cls in self.ct.native_classes.iter() {
-    //         self.code_vtable_for_class(*cls);
-    //     }
-    //     for cls in self.ct.program_classes.iter() {
-    //         self.code_vtable_for_class(*cls);
-    //     }
-    // }
+    pub fn code_vtables(&mut self) {
+        let natives_classes = self.ct.native_classes.clone();
+        for cls in natives_classes.iter() {
+            self.code_vtable_for_class(*cls);
+        }
+        let program_classes = self.ct.program_classes.clone();
+        for cls in program_classes.iter() {
+            self.code_vtable_for_class(*cls);
+        }
+    }
 
     // Global data
     pub fn register_globals(&mut self) {
         // self.register_vtable_pointers();
         // self.register_default_values();
     }
-
 
     // Class Initialization functions
 
@@ -181,15 +254,14 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     fn install_vtable_for_class(&self, name: &str, self_alloca: PointerValue) {
         let vtable_name = &format!("{}_vtable", name);
-        let ptr = self.module
-            .add_global(self.context.ptr_type(self.aspace), Some(self.aspace), vtable_name);
+        let ptr = self.module.get_global(vtable_name).unwrap();
 
         let pointee_ty = self.context.get_struct_type(name).unwrap();
         // vtable
         let field = self
-        .builder
-        .build_struct_gep(pointee_ty, self_alloca, VTABLE_IND, "gep")
-        .unwrap();
+            .builder
+            .build_struct_gep(pointee_ty, self_alloca, VTABLE_IND, "gep")
+            .unwrap();
         self.builder.build_store(field, ptr).unwrap();
     }
 
@@ -215,8 +287,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.build_return(None).unwrap();
         fn_val.verify(false);
     }
-
-
 
     fn code_empty_init_body(&self, _name: &str, _self_alloca: PointerValue) {}
 
@@ -280,10 +350,11 @@ impl<'ctx> CodeGenManager<'ctx> {
             .enumerate();
         for (ind, (_, typ, init)) in attrs {
             let value = if (*init.data == ExprData::NoExpr {}) {
-                if vec!["Int", "Bool", "String"].contains(&typ.as_str()) {
+                if ["Int", "Bool", "String"].contains(&typ.as_str()) {
                     self.code_new_and_init(*typ)
-                } else { self.context.ptr_type(self.aspace).const_null()}
-                    
+                } else {
+                    self.context.ptr_type(self.aspace).const_null()
+                }
             } else {
                 self.codegen(init)
             };
@@ -310,7 +381,36 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // Methods
 
-    fn code_main(&self) {
+    // VTables
+    // fn initialize_vtable_for_class(&mut self, cls: Sym) {
+    //     let vtable_name = &format!("{}_vtable", cls);
+    //     let ptr = self.module.get_global(vtable_name).unwrap().as_pointer_value();
+
+    //     let method_order = self.ct.class_method_order.get(&cls).unwrap();
+    //     let table_size: u32 = method_order.len().try_into().unwrap();
+    //     let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
+
+    //     for method_name in method_order.iter() {
+    //         let resolution_class = vtable_map.get(method_name).unwrap();
+    //         let fn_name = method_ref(*resolution_class, *method_name);
+    //         let fn_val = self.module.get_function(&fn_name).unwrap();
+    //         self.builder.build_store(ptr, fn_val);
+    //     }
+
+    // }
+    //
+    // fn initialize_vtables(&mut self) {
+    //     let natives_classes = self.ct.native_classes.clone();
+    //     for cls in natives_classes.iter() {
+    //         self.initialize_vtable_for_class(*cls);
+    //     }
+    //     let program_classes = self.ct.program_classes.clone();
+    //     for cls in program_classes.iter() {
+    //         self.initialize_vtable_for_class(*cls);
+    //     }
+    // }
+
+    fn code_main(&mut self) {
         // The entrypoint for the program.  Clang needs this to be called main, but it will
         // 1) create an instance of the Main class and
         // 2) call *that* class's `main` method (ie. Main.main).
@@ -323,7 +423,11 @@ impl<'ctx> CodeGenManager<'ctx> {
         let entry = self.context.append_basic_block(fn_val, block_name);
         self.builder.position_at_end(entry);
 
-        let main_instance = BasicMetadataValueEnum::PointerValue(self.code_new_and_init(sym("Main")));
+        // So far the vtables are full of null-pointers.  Install proper function pointers.
+        // self.initialize_vtables();
+
+        let main_instance =
+            BasicMetadataValueEnum::PointerValue(self.code_new_and_init(sym("Main")));
 
         let main_dot_main = self.module.get_function("Main.main").unwrap();
 
@@ -340,10 +444,8 @@ impl<'ctx> CodeGenManager<'ctx> {
         let return_type = self.context.void_type();
         // *String
 
-        let self_arg_type =
-            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let input_arg_type =
-            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
+        let self_arg_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
+        let input_arg_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
         let fn_type = return_type.fn_type(&[self_arg_type, input_arg_type], false);
         let fn_name = "IO.out_string";
         let fn_val = self.module.add_function(fn_name, fn_type, None);
@@ -375,8 +477,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn declare_puts(&self) {
-        let input_type =
-            BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
+        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
         let puts_type = self.context.i32_type().fn_type(&[input_type], false);
         self.module
             .add_function("puts", puts_type, Some(Linkage::External));
@@ -458,12 +559,14 @@ impl<'ctx> CodeGenManager<'ctx> {
     // Expr Codegen
 
     fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-
         let new_ptr = self.code_new_and_init(sym("String"));
 
         let pointee_ty = self.context.get_struct_type("String").unwrap();
         // set Length
-        let value = self.context.i32_type().const_int(str_array.get_type().len() as u64, false);
+        let value = self
+            .context
+            .i32_type()
+            .const_int(str_array.get_type().len() as u64, false);
         let field = self
             .builder
             .build_struct_gep(pointee_ty, new_ptr, 0, "gep")
@@ -485,7 +588,12 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         let field = self
             .builder
-            .build_struct_gep(self.context.get_struct_type("Int").unwrap(), new_ptr, 0, "gep")
+            .build_struct_gep(
+                self.context.get_struct_type("Int").unwrap(),
+                new_ptr,
+                0,
+                "gep",
+            )
             .unwrap();
         self.builder.build_store(field, int_val).unwrap();
 
