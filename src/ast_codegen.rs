@@ -26,7 +26,9 @@ impl Program {
         //
         cgm.code_all_inits();
         //
-        //cgm.code_all_methods();
+        cgm.code_all_method_bodies();
+        //
+        cgm.code_main();
         //
         cgm.module.verify().unwrap();
         cgm.module.print_to_file("out.ll").unwrap();

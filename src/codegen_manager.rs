@@ -187,7 +187,10 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
+    //
+    //
     // VTables
+
     fn code_vtable_for_class(&mut self, cls: Sym) {
         let method_order = self.ct.class_method_order.get(&cls).unwrap();
         let table_size: u32 = method_order.len().try_into().unwrap();
@@ -231,8 +234,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // Global data
     pub fn register_globals(&mut self) {
-        // self.register_vtable_pointers();
-        // self.register_default_values();
+        // TODO: read out symbol table cache into globals?
     }
 
     // Class Initialization functions
@@ -252,19 +254,6 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap()
     }
 
-    fn install_vtable_for_class(&self, name: &str, self_alloca: PointerValue) {
-        let vtable_name = &format!("{}_vtable", name);
-        let ptr = self.module.get_global(vtable_name).unwrap();
-
-        let pointee_ty = self.context.get_struct_type(name).unwrap();
-        // vtable
-        let field = self
-            .builder
-            .build_struct_gep(pointee_ty, self_alloca, VTABLE_IND, "gep")
-            .unwrap();
-        self.builder.build_store(field, ptr).unwrap();
-    }
-
     fn make_code_init(&self, name: Sym, code_body: fn(&CodeGenManager<'ctx>, &str, PointerValue)) {
         // Takes care of boilerplate function setup and calls `code_body`.
         let self_type_inner = self.context.ptr_type(self.aspace);
@@ -282,7 +271,18 @@ impl<'ctx> CodeGenManager<'ctx> {
         let self_alloca = self.create_entry_block_alloca(arg_name, fn_val);
         self.builder.build_store(self_alloca, first).unwrap();
 
-        self.install_vtable_for_class(name.as_str(), self_alloca);
+        // Install Vtable
+        let vtable_name = &format!("{}_vtable", name);
+        let ptr = self.module.get_global(vtable_name).unwrap();
+
+        let pointee_ty = self.context.get_struct_type(&name).unwrap();
+        let field = self
+            .builder
+            .build_struct_gep(pointee_ty, self_alloca, VTABLE_IND, "gep")
+            .unwrap();
+        self.builder.build_store(field, ptr).unwrap();
+
+        // Code Body
         code_body(self, name.as_str(), self_alloca);
         self.builder.build_return(None).unwrap();
         fn_val.verify(false);
@@ -340,7 +340,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.make_code_init(sym("String"), CodeGenManager::code_string_init_body);
     }
 
-    fn code_init_body(&self, class_name: &str, self_alloca: PointerValue) {
+    fn code_init_body_for_class(&self, class_name: &str, self_alloca: PointerValue) {
         let attrs = self
             .ct
             .class_attrs
@@ -368,7 +368,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_init_for_class(&self, name: Sym) {
-        self.make_code_init(name, CodeGenManager::code_init_body);
+        self.make_code_init(name, CodeGenManager::code_init_body_for_class);
     }
 
     pub fn code_all_inits(&self) {
@@ -381,36 +381,98 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // Methods
 
-    // VTables
-    // fn initialize_vtable_for_class(&mut self, cls: Sym) {
-    //     let vtable_name = &format!("{}_vtable", cls);
-    //     let ptr = self.module.get_global(vtable_name).unwrap().as_pointer_value();
+    fn code_io_out_string(&self) {
+        // IO.out_string
+        let fn_name = "IO.out_string";
+        let fn_val = self.module.get_function(fn_name).unwrap();
+        let block_name = &format!("{}_entry", fn_name);
+        let entry = self.context.append_basic_block(fn_val, block_name);
+        self.builder.position_at_end(entry);
 
-    //     let method_order = self.ct.class_method_order.get(&cls).unwrap();
-    //     let table_size: u32 = method_order.len().try_into().unwrap();
-    //     let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
+        let arg = fn_val.get_last_param().unwrap().into_pointer_value();
+        let pointee_ty = self.context.get_struct_type("String").unwrap();
+        // Get String array from second field of *String
+        let to_print_pointer = self
+            .builder
+            .build_struct_gep(pointee_ty, arg, 1, "gep")
+            .unwrap();
 
-    //     for method_name in method_order.iter() {
-    //         let resolution_class = vtable_map.get(method_name).unwrap();
-    //         let fn_name = method_ref(*resolution_class, *method_name);
-    //         let fn_val = self.module.get_function(&fn_name).unwrap();
-    //         self.builder.build_store(ptr, fn_val);
-    //     }
+        let to_print_0 = BasicMetadataValueEnum::PointerValue(to_print_pointer);
+        let puts_fn = self.module.get_function("puts").unwrap();
+        self.builder
+            .build_call(puts_fn, &[to_print_0], "call_puts")
+            .unwrap();
 
-    // }
-    //
-    // fn initialize_vtables(&mut self) {
-    //     let natives_classes = self.ct.native_classes.clone();
-    //     for cls in natives_classes.iter() {
-    //         self.initialize_vtable_for_class(*cls);
-    //     }
-    //     let program_classes = self.ct.program_classes.clone();
-    //     for cls in program_classes.iter() {
-    //         self.initialize_vtable_for_class(*cls);
-    //     }
-    // }
+        let body_val = self.codegen(&Expr::new(&sym("Object")));
+        self.builder.build_return(Some(&body_val)).unwrap();
+        fn_val.verify(false);
+    }
 
-    fn code_main(&mut self) {
+    fn declare_puts(&self) {
+        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
+        let puts_type = self.context.i32_type().fn_type(&[input_type], false);
+        self.module
+            .add_function("puts", puts_type, Some(Linkage::External));
+    }
+
+    fn code_method_body(
+        &mut self,
+        cls: Sym,
+        method: Sym,
+        parameters: &[Formal],
+        _return_type: Sym,
+        body: &Expr,
+    ) {
+        let fn_name = method_ref(cls, method);
+        let fn_val = self.module.get_function(&fn_name).unwrap();
+
+        let block_name = &format!("{}_entry", fn_name);
+        let entry = self.context.append_basic_block(fn_val, block_name);
+        self.builder.position_at_end(entry);
+
+        // Must add self parameter.
+        let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
+        all_parameters.extend(parameters.to_owned());
+        // Build Env
+        for (i, arg) in fn_val.get_param_iter().enumerate() {
+            let arg_name = all_parameters[i].name.as_str();
+            let alloca = self.create_entry_block_alloca(arg_name, fn_val);
+
+            self.builder.build_store(alloca, arg).unwrap();
+
+            self.variables.insert(all_parameters[i].name, alloca);
+        }
+
+        let body_val = self.codegen(body);
+        self.builder.build_return(Some(&body_val)).unwrap();
+        fn_val.verify(true);
+    }
+
+    fn code_native_method_bodies(&self) {
+        self.declare_puts();
+        self.code_io_out_string();
+        // TODO
+        // self.code_io_out_int();
+    }
+
+    fn code_program_method_bodies(&mut self) {
+        // Make sure not to grab methods for native classes.
+        let classes = self.ct.program_classes.clone();
+        for cls in classes {
+            let methods = self.ct.class_methods.get(&cls).unwrap().clone();
+            for (method, ((parameters, return_type), body)) in methods.iter() {
+                self.code_method_body(cls, *method, parameters, *return_type, body);
+            }
+        }
+    }
+
+    pub fn code_all_method_bodies(&mut self) {
+        self.code_native_method_bodies();
+        self.code_program_method_bodies();
+    }
+
+    // main (Entrypoint)
+    pub fn code_main(&mut self) {
         // The entrypoint for the program.  Clang needs this to be called main, but it will
         // 1) create an instance of the Main class and
         // 2) call *that* class's `main` method (ie. Main.main).
@@ -439,123 +501,9 @@ impl<'ctx> CodeGenManager<'ctx> {
         fn_val.verify(false);
     }
 
-    fn code_io_out_string(&self) {
-        // IO.out_string
-        let return_type = self.context.void_type();
-        // *String
-
-        let self_arg_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let input_arg_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let fn_type = return_type.fn_type(&[self_arg_type, input_arg_type], false);
-        let fn_name = "IO.out_string";
-        let fn_val = self.module.add_function(fn_name, fn_type, None);
-        let block_name = &format!("{}_entry", fn_name);
-        let entry = self.context.append_basic_block(fn_val, block_name);
-        self.builder.position_at_end(entry);
-
-        ////
-        // This created a bug, why?
-        //let arg_alloca_inner = self.create_entry_block_alloca("input", fn_val);
-        //let arg = fn_val.get_first_param().unwrap();
-        //self.builder.build_store(arg_alloca_inner, arg).unwrap();
-        let arg = fn_val.get_last_param().unwrap().into_pointer_value();
-        let pointee_ty = self.context.get_struct_type("String").unwrap();
-        // Get String array from second field of *String
-        let to_print_pointer = self
-            .builder
-            .build_struct_gep(pointee_ty, arg, 1, "gep")
-            .unwrap();
-
-        let to_print_0 = BasicMetadataValueEnum::PointerValue(to_print_pointer);
-        let puts_fn = self.module.get_function("puts").unwrap();
-        self.builder
-            .build_call(puts_fn, &[to_print_0], "call_puts")
-            .unwrap();
-
-        self.builder.build_return(None).unwrap();
-        fn_val.verify(false);
-    }
-
-    fn declare_puts(&self) {
-        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let puts_type = self.context.i32_type().fn_type(&[input_type], false);
-        self.module
-            .add_function("puts", puts_type, Some(Linkage::External));
-    }
-
-    fn code_native_methods(&self) {
-        self.declare_puts();
-        self.code_io_out_string();
-        // TODO
-        // self.code_io_out_int();
-    }
-
-    fn code_program_methods(&mut self) {
-        // Make sure not to grab methods for native classes.
-        let classes = self.ct.program_classes.clone();
-        for cls in classes {
-            let methods = self.ct.class_methods.get(&cls).unwrap().clone();
-            for (method, ((parameters, return_type), body)) in methods.iter() {
-                self.code_method(cls, *method, parameters, *return_type, body);
-            }
-        }
-    }
-
-    fn code_method(
-        &mut self,
-        cls: Sym,
-        method: Sym,
-        parameters: &[Formal],
-        _return_type: Sym,
-        body: &Expr,
-    ) {
-        // TODO! Currently ignoring the types of args / return and treating them as generic pointers.
-
-        // Must add self parameter.
-        let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
-        all_parameters.extend(parameters.to_owned());
-
-        let ret_type = self.context.ptr_type(self.aspace);
-        let args_types = std::iter::repeat(ret_type)
-            .take(all_parameters.len())
-            .map(|f| f.into())
-            .collect::<Vec<BasicMetadataTypeEnum>>();
-
-        let fn_type = ret_type.fn_type(&args_types[..], false);
-        let fn_name = format!("{}.{}", cls, method);
-        let fn_val = self.module.add_function(&fn_name, fn_type, None);
-
-        // set arguments names
-        for (i, arg) in fn_val.get_param_iter().enumerate() {
-            arg.into_pointer_value()
-                .set_name(all_parameters[i].name.as_str());
-        }
-
-        let block_name = &format!("{}_entry", fn_name);
-        let entry = self.context.append_basic_block(fn_val, block_name);
-        self.builder.position_at_end(entry);
-
-        // Build Env
-        for (i, arg) in fn_val.get_param_iter().enumerate() {
-            let arg_name = all_parameters[i].name.as_str();
-            let alloca = self.create_entry_block_alloca(arg_name, fn_val);
-
-            self.builder.build_store(alloca, arg).unwrap();
-
-            self.variables.insert(all_parameters[i].name, alloca);
-        }
-
-        let body_val = self.codegen(body);
-        self.builder.build_return(Some(&body_val)).unwrap();
-        fn_val.verify(true);
-    }
-
-    pub fn code_all_methods(&mut self) {
-        self.code_native_methods();
-        self.code_program_methods();
-        self.code_main();
-    }
-
+    //
+    //
+    //
     // Expr Codegen
 
     fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
