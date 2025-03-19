@@ -1,6 +1,6 @@
 use std::collections::hash_map::HashMap;
 
-use crate::ast::{Expr, ExprData, Formal};
+use crate::ast::{Expr, ExprData, Formal, Program};
 use crate::class_table::ClassTable;
 use crate::symbol::{sym, Sym};
 use either::Either::Left;
@@ -655,5 +655,39 @@ impl<'ctx> CodeGenManager<'ctx> {
 
             _ => panic!("codegen not yet supported for ExprData variant {:?}", data),
         }
+    }
+}
+
+
+
+
+impl Program {
+    pub fn to_llvm(&self) {
+        let context = Context::create();
+        let ct = ClassTable::new(&self.classes).expect(
+            "Failure to construct ClassTable \
+            from program (should have been caught \
+            in semantic analysis).",
+        );
+        let mut cgm = CodeGenManager::init(&context, ct);
+        //
+        // println!("{:?}", serde_json::to_string(ustr::cache()).unwrap());
+        //
+        cgm.code_all_class_structs();
+        //
+        cgm.code_all_method_stubs();
+        //
+        cgm.code_vtables();
+        //
+        cgm.register_globals();
+        //
+        cgm.code_all_inits();
+        //
+        cgm.code_all_method_bodies();
+        //
+        cgm.code_main();
+        //
+        cgm.module.verify().unwrap();
+        cgm.module.print_to_file("out.ll").unwrap();
     }
 }

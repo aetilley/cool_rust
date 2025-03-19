@@ -7,14 +7,12 @@ edition = "2021"
 ustr = "1.1.0"
 logos = "0.15.0"
 itertools = "0.14.0"
+serde_json = "1.0.140"
 either = "1.15.0"
+interner = "0.2.1"
 common_macros = "0.1.1"
 lalrpop-util = { version = "0.22.0", features = ["lexer"] }
 inkwell = { version = "0.5.0", features = ["llvm18-0"] }
-#  NOTE, the following version depends on what verison of LLVM you have installed.
-#  See https://github.com/tari/llvm-sys.rs?tab=readme-ov-file#llvm-compatibility
-# llvm-sys = "181.0.0-rc1"
-
 # for some reason LLVM needs 
 zstd = "0.13"
 

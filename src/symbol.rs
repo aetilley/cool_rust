@@ -39,3 +39,48 @@ pub fn sym(s: &str) -> Ustr {
 //  substr      : Sym = sym("substr");
 //  type_name   : Sym = sym("type_name");
 //  _val        : Sym = sym("_val");
+
+
+// In progress....
+
+use interner::Pooled;
+use std::hash::RandomState;
+use interner::global::GlobalPool;
+
+static STRINGS: GlobalPool<String> = GlobalPool::new();
+static INTS: GlobalPool<String> = GlobalPool::new();
+static SPECIAL: GlobalPool<String> = GlobalPool::new();
+
+type SSym = Pooled<&'static GlobalPool<String>, RandomState>; 
+
+fn strsym(s: &str) -> SSym {
+    let my_string = STRINGS.get(s);
+    my_string
+
+}
+
+fn intsym(s: &str) -> SSym {
+    let my_string = INTS.get(s);
+    my_string
+
+}
+
+fn special(s: &str) -> SSym {
+    let my_string = SPECIAL.get(s);
+    my_string
+
+}
+
+// TEST this before jumping in
+fn dump_strings() {
+    let all: Vec<Pooled<&'static GlobalPool<String>, RandomState>> = STRINGS.pooled();
+    todo!();
+}
+
+fn dump_ints() {
+    let all: Vec<Pooled<&'static GlobalPool<String>, RandomState>> = STRINGS.pooled();
+    todo!();
+}
+
+
+
