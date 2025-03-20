@@ -1,3 +1,5 @@
+(* A simple program in the cool language *)
+
 class Apple {
   b: Int;
 };
