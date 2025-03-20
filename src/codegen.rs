@@ -17,29 +17,52 @@ use inkwell::AddressSpace;
 use crate::codegen_constants::*;
 
 pub struct CodeGenManager<'ctx> {
+    pub context: &'ctx Context,
     pub builder: Builder<'ctx>,
     pub module: Module<'ctx>,
-    pub context: &'ctx Context,
-    pub ct: ClassTable,
     pub variables: HashMap<Sym, PointerValue<'ctx>>,
     pub aspace: AddressSpace,
+    pub ct: ClassTable,
 }
 
 impl<'ctx> CodeGenManager<'ctx> {
-    pub fn init(context: &'ctx Context, ct: ClassTable) -> Self {
-        let module = context.create_module("cool_module");
+    pub fn from(context: &'ctx Context, program: &Program) -> Self {
         let builder = context.create_builder();
+        let module = context.create_module("cool_module");
         let variables = HashMap::<Sym, PointerValue>::new();
         let aspace = AddressSpace::default();
 
-        CodeGenManager {
+        let ct = ClassTable::new(&program.classes).expect(
+            "Failure to construct ClassTable \
+            from program (should have been caught \
+            in semantic analysis).",
+        );
+
+        let mut man = CodeGenManager {
+            context,
             builder,
             module,
-            context,
-            ct,
             variables,
             aspace,
-        }
+            ct,
+        };
+
+        //
+        man.code_all_class_structs();
+        //
+        man.code_all_method_declarations();
+        //
+        man.code_vtables();
+        //
+        man.register_globals();
+        //
+        man.code_all_inits();
+        //
+        man.code_all_method_bodies();
+
+        man.code_main();
+
+        man
     }
 
     // Declare and Code Class Structs
@@ -584,7 +607,10 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_new_and_init(&self, typ: Sym) -> PointerValue<'ctx> {
-        let struct_type = self.context.get_struct_type(typ.as_str()).unwrap();
+        let struct_type = self
+            .context
+            .get_struct_type(typ.as_str())
+            .unwrap_or_else(|| panic!("No type {} declared.", typ));
         let malloc_name = &format!("{}_malloc", typ.as_str());
         let new_ptr = self.builder.build_malloc(struct_type, malloc_name).unwrap();
         let init_name = &format!("{}_init", typ.as_str());
@@ -604,6 +630,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
+            ExprData::Object { id } => self.variables.get(id).unwrap().clone(),
             ExprData::StrConst { val } => {
                 let array_values: Vec<IntValue> = val
                     .as_bytes()
@@ -758,29 +785,30 @@ impl<'ctx> CodeGenManager<'ctx> {
 impl Program {
     pub fn to_llvm(&self, out_file: &str) {
         let context = Context::create();
-        let ct = ClassTable::new(&self.classes).expect(
-            "Failure to construct ClassTable \
-            from program (should have been caught \
-            in semantic analysis).",
-        );
-        let mut cgm = CodeGenManager::init(&context, ct);
-        //
-        cgm.code_all_class_structs();
-        //
-        cgm.code_all_method_declarations();
-        //
-        cgm.code_vtables();
-        //
-        cgm.register_globals();
-        //
-        cgm.code_all_inits();
-        //
-        cgm.code_all_method_bodies();
-        //
-        cgm.code_main();
-        //
-        // cgm.module.verify().unwrap();
+        let man = CodeGenManager::from(&context, self);
+        man.module.verify().unwrap();
+        man.module.print_to_file(out_file).unwrap();
+    }
+}
 
-        cgm.module.print_to_file(out_file).unwrap();
+#[cfg(test)]
+mod codegen_tests {
+
+    use super::*;
+    use crate::ast_parse::Parse;
+
+    #[test]
+    fn test_codegen_string() {
+        let context = Context::create();
+        let program = Program::parse("class Main{main():Object{0};};").unwrap();
+        let man = CodeGenManager::from(&context, &program);
+
+        let expr = Expr::int_const("42");
+
+        let result = man.codegen(&expr);
+
+        assert_eq!(result.get_type(), man.context.ptr_type(man.aspace));
+
+
     }
 }
