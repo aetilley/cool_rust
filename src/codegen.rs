@@ -2,7 +2,7 @@ use std::collections::hash_map::HashMap;
 
 use crate::ast::{Expr, ExprData, Formal, Program};
 use crate::class_table::ClassTable;
-use crate::symbol::{sym, Sym};
+use crate::symbol::{dump_ints, dump_strings, sym, Sym};
 use either::Either::Left;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -197,8 +197,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         // set arguments names
         for (i, arg) in fn_val.get_param_iter().enumerate() {
-            arg.into_pointer_value()
-                .set_name(&all_parameters[i].name);
+            arg.into_pointer_value().set_name(&all_parameters[i].name);
         }
     }
 
@@ -271,9 +270,64 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
+    pub fn register_global_for_int(&mut self, i: &Sym) {
+        let i_str: &str = &i[..];
+        let i_int: u64 = i_str.parse().unwrap();
+        let i_val = self.context.i32_type().const_int(i_int, false);
+        let int_vtable_ptr = self
+            .module
+            .get_global(&vtable_ref(&sym("Int")))
+            .unwrap()
+            .as_pointer_value();
+
+        let initializer = self
+            .context
+            .const_struct(&[int_vtable_ptr.into(), i_val.into()], false);
+
+        let global_name = &global_int_ref(i);
+
+        let int_global =
+            self.module
+                .add_global(initializer.get_type(), Some(self.aspace), global_name);
+
+        int_global.set_initializer(&initializer);
+    }
+
+    pub fn register_global_for_string(&mut self, s: &Sym) {
+        let str_content = self.code_array_value_from_sym(s);
+        let str_vtable_ptr = self
+            .module
+            .get_global(&vtable_ref(&sym("String")))
+            .unwrap()
+            .as_pointer_value();
+        let str_len = self
+            .context
+            .i32_type()
+            .const_int(str_content.get_type().len().try_into().unwrap(), false);
+
+        let initializer = self.context.const_struct(
+            &[str_vtable_ptr.into(), str_len.into(), str_content.into()],
+            false,
+        );
+
+        let global_name = &global_string_ref(s);
+
+        let int_global =
+            self.module
+                .add_global(initializer.get_type(), Some(self.aspace), global_name);
+
+        int_global.set_initializer(&initializer);
+    }
+
     // Global data
     pub fn register_globals(&mut self) {
-        // TODO: read out symbol table cache into globals?
+        for i in dump_ints().iter() {
+            self.register_global_for_int(i);
+        }
+
+        for s in dump_strings().iter() {
+            self.register_global_for_string(s);
+        }
     }
 
     // Class Initialization functions
@@ -485,7 +539,8 @@ impl<'ctx> CodeGenManager<'ctx> {
 
             self.builder.build_store(alloca, arg).unwrap();
 
-            self.variables.insert(all_parameters[i].name.to_owned(), alloca);
+            self.variables
+                .insert(all_parameters[i].name.to_owned(), alloca);
         }
 
         let body_val = self.codegen(body);
@@ -565,47 +620,47 @@ impl<'ctx> CodeGenManager<'ctx> {
     //
     // Expr Codegen
 
-    fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-        let new_ptr = self.code_new_and_init(&sym("String"));
+    // fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
+    //     let new_ptr = self.code_new_and_init(&sym("String"));
 
-        let pointee_ty = self.context.get_struct_type("String").unwrap();
-        // set Length
-        let value = self
-            .context
-            .i32_type()
-            .const_int(str_array.get_type().len() as u64, false);
-        let field = self
-            .builder
-            .build_struct_gep(pointee_ty, new_ptr, 0, "gep")
-            .unwrap();
-        self.builder.build_store(field, value).unwrap();
+    //     let pointee_ty = self.context.get_struct_type("String").unwrap();
+    //     // set Length
+    //     let value = self
+    //         .context
+    //         .i32_type()
+    //         .const_int(str_array.get_type().len() as u64, false);
+    //     let field = self
+    //         .builder
+    //         .build_struct_gep(pointee_ty, new_ptr, 0, "gep")
+    //         .unwrap();
+    //     self.builder.build_store(field, value).unwrap();
 
-        // set array
-        let field = self
-            .builder
-            .build_struct_gep(pointee_ty, new_ptr, 1, "gep")
-            .unwrap();
-        self.builder.build_store(field, str_array).unwrap();
+    //     // set array
+    //     let field = self
+    //         .builder
+    //         .build_struct_gep(pointee_ty, new_ptr, 1, "gep")
+    //         .unwrap();
+    //     self.builder.build_store(field, str_array).unwrap();
 
-        new_ptr
-    }
+    //     new_ptr
+    // }
 
-    fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
-        let new_ptr = self.code_new_and_init(&sym("Int"));
+    // fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
+    //     let new_ptr = self.code_new_and_init(&sym("Int"));
 
-        let field = self
-            .builder
-            .build_struct_gep(
-                self.context.get_struct_type("Int").unwrap(),
-                new_ptr,
-                0,
-                "gep",
-            )
-            .unwrap();
-        self.builder.build_store(field, int_val).unwrap();
+    //     let field = self
+    //         .builder
+    //         .build_struct_gep(
+    //             self.context.get_struct_type("Int").unwrap(),
+    //             new_ptr,
+    //             0,
+    //             "gep",
+    //         )
+    //         .unwrap();
+    //     self.builder.build_store(field, int_val).unwrap();
 
-        new_ptr
-    }
+    //     new_ptr
+    // }
 
     fn code_new_and_init(&self, typ: &Sym) -> PointerValue<'ctx> {
         let struct_type = self
@@ -627,28 +682,36 @@ impl<'ctx> CodeGenManager<'ctx> {
         new_ptr
     }
 
+    fn code_array_value_from_sym(&self, s: &Sym) -> ArrayValue<'ctx> {
+        let array_values: Vec<IntValue> = s
+            .as_bytes()
+            .iter()
+            .map(|byt| self.context.i8_type().const_int(*byt as u64, false))
+            .collect();
+        self.context.i8_type().const_array(&array_values[..])
+    }
+
     pub fn codegen(&self, expr: &Expr) -> PointerValue {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
             ExprData::Object { id } => self.variables.get(id).unwrap().clone(),
             ExprData::StrConst { val } => {
-                let array_values: Vec<IntValue> = val
-                    .as_bytes()
-                    .iter()
-                    .map(|byt| self.context.i8_type().const_int(*byt as u64, false))
-                    .collect();
-                let inner = self.context.i8_type().const_array(&array_values[..]);
-                let new_struct = self.code_new_string(inner);
-                new_struct
+                let global_name = global_string_ref(val);
+                // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
+                self.module
+                    .get_global(&global_name)
+                    .unwrap_or_else(|| panic!("No static string found for '{}'", val))
+                    .as_pointer_value()
             }
 
             ExprData::IntConst { val } => {
-                let int_val: u64 = val.parse().unwrap();
-
-                let inner = self.context.i8_type().const_int(int_val, false);
-                let new_struct = self.code_new_int(inner);
-                new_struct
+                let global_name = global_int_ref(val);
+                // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
+                self.module
+                    .get_global(&global_name)
+                    .unwrap_or_else(|| panic!("No static string found for '{}'", val))
+                    .as_pointer_value()
             }
             ExprData::New { typ } => self.code_new_and_init(typ),
 
@@ -809,7 +872,5 @@ mod codegen_tests {
         let result = man.codegen(&expr);
 
         assert_eq!(result.get_type(), man.context.ptr_type(man.aspace));
-
-
     }
 }

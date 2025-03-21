@@ -2,7 +2,7 @@
 
 use std::fmt::Debug;
 
-use crate::symbol::{sym, Sym};
+use crate::symbol::{sym, intsym, strsym, Sym};
 
 pub fn add_one<T: Clone>(some: &Vec<T>, one: &T) -> Vec<T> {
     // Takes ownership
@@ -378,11 +378,11 @@ impl ExprData {
     }
 
     pub fn int_const(val: &str) -> ExprData {
-        ExprData::IntConst { val: sym(val) }
+        ExprData::IntConst { val: intsym(val) }
     }
 
     pub fn str_const(val: &str) -> ExprData {
-        ExprData::StrConst { val: sym(val) }
+        ExprData::StrConst { val: strsym(val) }
     }
 
     pub fn dispatch(slf: Expr, method_name: &str, args: Exprs) -> ExprData {

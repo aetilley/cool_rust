@@ -1,7 +1,7 @@
 (* A simple program in the cool language *)
 
 class Apple {
-  b: Int;
+  b: Int <- 42;
 };
 
 class Orange inherits Apple {

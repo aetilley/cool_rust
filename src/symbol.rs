@@ -40,11 +40,11 @@ static SPECIAL: GlobalPool<String> = GlobalPool::new();
 
 pub type Sym = Pooled<&'static GlobalPool<String>, RandomState>;
 
-fn strsym(s: &str) -> Sym {
+pub fn strsym(s: &str) -> Sym {
     STRINGS.get(s)
 }
 
-fn intsym(s: &str) -> Sym {
+pub fn intsym(s: &str) -> Sym {
     INTS.get(s)
 }
 
@@ -53,12 +53,15 @@ pub fn sym(s: &str) -> Sym {
 }
 
 // TEST this before jumping in
-fn dump_strings() {
-    let _all: Vec<Pooled<&'static GlobalPool<String>, RandomState>> = STRINGS.pooled();
-    todo!();
+
+pub fn dump_syms() -> Vec<Sym> {
+    SPECIAL.pooled()
 }
 
-fn dump_ints() {
-    let _all: Vec<Pooled<&'static GlobalPool<String>, RandomState>> = STRINGS.pooled();
-    todo!();
+pub fn dump_strings() -> Vec<Sym> {
+    STRINGS.pooled()
+}
+
+pub fn dump_ints() -> Vec<Sym> {
+    INTS.pooled()
 }
