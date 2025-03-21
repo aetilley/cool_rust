@@ -1,15 +1,3 @@
-use ustr::{ustr, Ustr};
-
-// Note that Sym implements the Copy trait.
-// Caution:  Calling `clone` on a &Sym returns a
-// copy of a Sym, but calling `to_owned` will
-// return a String.
-pub type Sym = Ustr;
-
-pub fn sym(s: &str) -> Ustr {
-    ustr(s)
-}
-
 // Would be nice if we could define
 // globals as follows, but sym is a non-constant
 // function.  Think about this.
@@ -50,17 +38,17 @@ static STRINGS: GlobalPool<String> = GlobalPool::new();
 static INTS: GlobalPool<String> = GlobalPool::new();
 static SPECIAL: GlobalPool<String> = GlobalPool::new();
 
-type SSym = Pooled<&'static GlobalPool<String>, RandomState>;
+pub type Sym = Pooled<&'static GlobalPool<String>, RandomState>;
 
-fn strsym(s: &str) -> SSym {
+fn strsym(s: &str) -> Sym {
     STRINGS.get(s)
 }
 
-fn intsym(s: &str) -> SSym {
+fn intsym(s: &str) -> Sym {
     INTS.get(s)
 }
 
-fn special(s: &str) -> SSym {
+pub fn sym(s: &str) -> Sym {
     SPECIAL.get(s)
 }
 

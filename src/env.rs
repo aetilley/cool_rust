@@ -30,24 +30,24 @@ impl Env {
         self.stack.pop();
     }
 
-    pub fn lookup(&self, key: Sym) -> Option<Sym> {
+    pub fn lookup(&self, key: &Sym) -> Option<Sym> {
         // Start search from top of stack.
         for scope in self.stack.iter().rev() {
             if let Some(value) = scope.get(&key) {
-                return Some(*value);
+                return Some(value.to_owned());
             }
         }
         None
     }
 
-    pub fn add_binding(&mut self, key: Sym, value: Sym) {
+    pub fn add_binding(&mut self, key: &Sym, value: &Sym) {
         // NOTE:  Currently does not Err if the key already exists
         // in the current scope. Sometimes we may want to throw an error
         // E.g. if a symbol appears twice in a function param list.
         let top = self.stack.last_mut();
         match top {
             Some(frame) => {
-                frame.insert(key, value);
+                frame.insert(key.clone(), value.clone());
             }
             None => {
                 self.enter_scope();
@@ -65,36 +65,36 @@ mod env_tests {
 
     #[test]
     pub fn scope_test() {
-        let key1 = sym("key1");
-        let key2 = sym("key2");
-        let key3 = sym("key3");
-        let val1 = sym("val1");
-        let val2_1 = sym("val2_1");
-        let val2_2 = sym("val2_2");
-        let val3 = sym("val3");
+        let key1 = &sym("key1");
+        let key2 = &sym("key2");
+        let key3 = &sym("key3");
+        let val1 = &sym("val1");
+        let val2_1 = &sym("val2_1");
+        let val2_2 = &sym("val2_2");
+        let val3 = &sym("val3");
 
         let mut env = Env::new();
 
         env.add_binding(key1, val1);
 
-        assert_eq!(env.lookup(key1), Some(val1));
+        assert_eq!(env.lookup(key1), Some(val1.to_owned()));
 
         env.enter_scope();
         env.add_binding(key2, val2_1);
 
-        assert_eq!(env.lookup(key1), Some(val1));
-        assert_eq!(env.lookup(key2), Some(val2_1));
+        assert_eq!(env.lookup(key1), Some(val1.to_owned()));
+        assert_eq!(env.lookup(key2), Some(val2_1.to_owned()));
 
         env.enter_scope();
         env.add_binding(key2, val2_2);
         env.add_binding(key3, val3);
 
-        assert_eq!(env.lookup(key2), Some(val2_2));
-        assert_eq!(env.lookup(key3), Some(val3));
+        assert_eq!(env.lookup(key2), Some(val2_2.to_owned()));
+        assert_eq!(env.lookup(key3), Some(val3.to_owned()));
 
         env.exit_scope();
 
-        assert_eq!(env.lookup(key2), Some(val2_1));
+        assert_eq!(env.lookup(key2), Some(val2_1.to_owned()));
         assert_eq!(env.lookup(key3), None);
     }
 }

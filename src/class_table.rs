@@ -102,7 +102,7 @@ impl ClassTable {
     }
 
     fn _mark_descendants(
-        node: Sym,
+        node: &Sym,
         visited: &mut HashSet<Sym>,
         class_children: &ClassChildrenTy,
     ) -> Result<(), SemanticAnalysisError> {
@@ -117,8 +117,8 @@ impl ClassTable {
                         );
                         return Err(SemanticAnalysisError { msg });
                     }
-                    visited.insert(*child);
-                    ClassTable::_mark_descendants(*child, visited, class_children)?;
+                    visited.insert(child.clone());
+                    ClassTable::_mark_descendants(child, visited, class_children)?;
                 }
                 Ok(())
             }
@@ -128,13 +128,13 @@ impl ClassTable {
     fn detect_cycles(class_children: &ClassChildrenTy) -> Result<(), SemanticAnalysisError> {
         let root = sym("Object");
         let mut visited = HashSet::<Sym>::new();
-        visited.insert(root);
-        ClassTable::_mark_descendants(root, &mut visited, class_children)
+        visited.insert(root.clone());
+        ClassTable::_mark_descendants(&root, &mut visited, class_children)
             .expect("We really should not be getting loops involving Object");
         let mut detached_classes = hash_set! {};
         for key in class_children.keys() {
             if !visited.contains::<Sym>(key) {
-                detached_classes.insert(*key);
+                detached_classes.insert(key.clone());
             }
         }
         if !detached_classes.is_empty() {
@@ -156,14 +156,16 @@ impl ClassTable {
         class_children: &mut ClassChildrenTy,
     ) {
         if class.parent != "No_class" {
-            class_parent.insert(class.name, class.parent);
+            class_parent.insert(class.name.clone(), class.parent.clone());
             class_children
-                .entry(class.parent)
+                .entry(class.parent.clone())
                 .and_modify(|children| {
-                    children.insert(class.name);
+                    children.insert(class.name.clone());
                 })
-                .or_insert(hash_set! {class.name});
-            class_children.entry(class.name).or_insert(hash_set! {});
+                .or_insert(hash_set! {class.name.clone()});
+            class_children
+                .entry(class.name.clone())
+                .or_insert(hash_set! {});
         }
 
         let mut attrs = Vec::<AttrTypeInit>::new();
@@ -177,22 +179,22 @@ impl ClassTable {
                     typ,
                     body,
                 } => {
-                    let signature = (formals.clone(), *typ);
+                    let signature = (formals.clone(), typ.clone());
                     let method = (signature, body.clone());
-                    methods.insert(*name, method);
+                    methods.insert(name.clone(), method);
                 }
                 Feature::Attr { name, typ, init } => {
-                    attrs.push((*name, *typ, init.clone()));
+                    attrs.push((name.clone(), typ.clone(), init.clone()));
                 }
             }
         }
 
-        class_methods.insert(class.name, methods);
-        class_attrs.insert(class.name, attrs);
+        class_methods.insert(class.name.clone(), methods);
+        class_attrs.insert(class.name.clone(), attrs);
     }
 
     fn register_vtable_and_method_offsets_for_class(
-        cls: Sym,
+        cls: &Sym,
         class_parent: &ClassParentTy,
         class_methods: &ClassMethodTy,
         class_vtable: &mut ClassVTableTy,
@@ -205,7 +207,7 @@ impl ClassTable {
         if let Some(parent) = class_parent.get(&cls) {
             if !class_vtable.contains_key(parent) {
                 ClassTable::register_vtable_and_method_offsets_for_class(
-                    *parent,
+                    parent,
                     class_parent,
                     class_methods,
                     class_vtable,
@@ -216,7 +218,7 @@ impl ClassTable {
             method_order = class_method_order.get(parent).unwrap().clone();
         } else {
             assert!(
-                cls == sym("Object"),
+                cls == &sym("Object"),
                 "Non-Object class {} has no parent.",
                 cls
             );
@@ -226,22 +228,19 @@ impl ClassTable {
         // Sorting will make testing simpler.
         let methods = sorted(class_methods.get(&cls).unwrap().keys());
         for method_name in methods {
-            vtable.insert(*method_name, cls);
+            vtable.insert(method_name.clone(), cls.clone());
 
             if method_order.contains(method_name) {
                 // Override parent, use same offset.
-                let old_index = method_order
-                    .iter()
-                    .position(|&r| r == *method_name)
-                    .unwrap();
-                method_order[old_index] = *method_name;
+                let old_index = method_order.iter().position(|r| r == method_name).unwrap();
+                method_order[old_index] = method_name.clone();
             } else {
                 // New function name.
-                method_order.push(*method_name);
+                method_order.push(method_name.clone());
             }
         }
-        class_vtable.insert(cls, vtable);
-        class_method_order.insert(cls, method_order);
+        class_vtable.insert(cls.clone(), vtable);
+        class_method_order.insert(cls.clone(), method_order);
     }
 
     pub fn get_max_vtable_size(&self) -> usize {
@@ -275,16 +274,18 @@ impl ClassTable {
 
         ClassTable::detect_cycles(&class_children)?;
 
-        let all_class_names: ClassesTy = all_classes.iter().map(|cls| cls.name).collect();
-        let program_class_names: ClassesTy = program_classes.iter().map(|cls| cls.name).collect();
-        let native_class_names: ClassesTy = native_classes.iter().map(|cls| cls.name).collect();
+        let all_class_names: ClassesTy = all_classes.iter().map(|cls| cls.name.clone()).collect();
+        let program_class_names: ClassesTy =
+            program_classes.iter().map(|cls| cls.name.clone()).collect();
+        let native_class_names: ClassesTy =
+            native_classes.iter().map(|cls| cls.name.clone()).collect();
 
         let mut class_vtable = HashMap::<Sym, VTableTy>::new();
         let mut class_method_order = HashMap::<Sym, MethodOrderTy>::new();
 
         for cls in all_class_names.iter() {
             ClassTable::register_vtable_and_method_offsets_for_class(
-                *cls,
+                cls,
                 &class_parent,
                 &class_methods,
                 &mut class_vtable,
@@ -305,11 +306,11 @@ impl ClassTable {
         })
     }
 
-    pub fn get_all_attrs(&self, name: Sym) -> Vec<AttrTypeInit> {
+    pub fn get_all_attrs(&self, name: &Sym) -> Vec<AttrTypeInit> {
         // Get attrs of class `name` and of all ancestors.
         let mut result = Vec::<AttrTypeInit>::new();
         if let Some(parent) = self.class_parent.get(&name) {
-            result = self.get_all_attrs(*parent);
+            result = self.get_all_attrs(parent);
         }
         for attr in self.class_attrs.get(&name).unwrap() {
             result.push(attr.clone())
@@ -319,8 +320,8 @@ impl ClassTable {
 
     pub fn get_method(
         &self,
-        class_name: Sym,
-        method_name: Sym,
+        class_name: &Sym,
+        method_name: &Sym,
     ) -> Result<MethodTy, SemanticAnalysisError> {
         match self.class_methods.get(&class_name) {
             None => {
@@ -339,8 +340,8 @@ impl ClassTable {
 
     pub fn get_method_dynamic(
         &self,
-        class_name: Sym,
-        method_name: Sym,
+        class_name: &Sym,
+        method_name: &Sym,
     ) -> Result<MethodTy, SemanticAnalysisError> {
         if let Ok(method) = self.get_method(class_name, method_name) {
             return Ok(method);
@@ -348,7 +349,7 @@ impl ClassTable {
 
         let mut next = class_name;
         while let Some(parent) = self.class_parent.get(&next) {
-            next = *parent;
+            next = parent;
             match self.get_method(next, method_name) {
                 Err(_) => {
                     continue;
@@ -365,7 +366,7 @@ impl ClassTable {
         Err(SemanticAnalysisError { msg })
     }
 
-    pub fn get_lub(&self, t1: Sym, t2: Sym) -> Sym {
+    pub fn get_lub(&self, t1: &Sym, t2: &Sym) -> Sym {
         // In order to comput the least upper bound of two types, we
         // comput the two ancestries to the root "Object" and then
         // read them both backwards to find the first place they diverge.
@@ -374,13 +375,13 @@ impl ClassTable {
         let mut ancestry2 = vec![t2];
         let mut next = t1;
         while let Some(parent) = self.class_parent.get(&next) {
-            ancestry1.push(*parent);
-            next = *parent;
+            ancestry1.push(parent);
+            next = parent;
         }
         let mut next = t2;
         while let Some(parent) = self.class_parent.get(&next) {
-            ancestry2.push(*parent);
-            next = *parent;
+            ancestry2.push(parent);
+            next = parent;
         }
         let mut rev_pairs = ancestry1.into_iter().rev().zip(ancestry2.into_iter().rev());
         let (e1, e2) = rev_pairs.next().unwrap();
@@ -394,22 +395,27 @@ impl ClassTable {
         let mut lub = e1;
         for (e1, e2) in rev_pairs {
             if e1 != e2 {
-                return lub;
+                return lub.clone();
             }
             lub = e1
         }
-        lub
+        lub.clone()
     }
 
-    pub fn assert_subtype(&self, t1: Sym, t2: Sym, cls: Sym) -> Result<(), SemanticAnalysisError> {
+    pub fn assert_subtype(
+        &self,
+        t1: &Sym,
+        t2: &Sym,
+        cls: &Sym,
+    ) -> Result<(), SemanticAnalysisError> {
         // If this function gets called on "No_type" almost certainly something has
         // gone wrong.
         // Note that the class is passed in just in case either of the arguments is SELF_TYPE.
-        assert_ne!(t1, sym("No_type"));
-        assert_ne!(t2, sym("No_type"));
+        assert_ne!(*t1, sym("No_type"));
+        assert_ne!(*t2, sym("No_type"));
 
-        let s1 = if t1 == sym("SELF_TYPE") { cls } else { t1 };
-        let s2 = if t2 == sym("SELF_TYPE") { cls } else { t2 };
+        let s1 = if *t1 == sym("SELF_TYPE") { cls } else { t1 };
+        let s2 = if *t2 == sym("SELF_TYPE") { cls } else { t2 };
 
         if s1 == s2 {
             return Ok(());
@@ -417,10 +423,10 @@ impl ClassTable {
 
         let mut next = s1;
         while let Some(parent) = self.class_parent.get(&next) {
-            if parent == &s2 {
+            if parent == s2 {
                 return Ok(());
             };
-            next = *parent;
+            next = parent;
         }
 
         let msg = format!("Type {} is not a subtype of type {}", s1, s2);
@@ -439,33 +445,33 @@ mod class_table_tests {
     #[test]
     fn test_assert_subtype() {
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = sym("Int");
-        let t2 = sym("Int");
-        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
+        let t1 = &sym("Int");
+        let t2 = &sym("Int");
+        let result = ct.assert_subtype(t1, t2, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = sym("Int");
-        let t2 = sym("Object");
-        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
+        let t1 = &sym("Int");
+        let t2 = &sym("Object");
+        let result = ct.assert_subtype(t1, t2, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = sym("Object");
-        let t2 = sym("Int");
-        let result = ct.assert_subtype(t1, t2, sym("UNUSED"));
+        let t1 = &sym("Object");
+        let t2 = &sym("Int");
+        let result = ct.assert_subtype(t1, t2, &sym("UNUSED"));
         assert!(result.is_err());
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = sym("SELF_TYPE");
-        let t2 = sym("Orange");
-        let result = ct.assert_subtype(t1, t2, sym("Orange"));
+        let t1 = &sym("SELF_TYPE");
+        let t2 = &sym("Orange");
+        let result = ct.assert_subtype(t1, t2, &sym("Orange"));
         assert_eq!(result, Ok(()));
 
         let ct = ClassTable::new(&vec![]).unwrap();
-        let t1 = sym("SELF_TYPE");
-        let t2 = sym("Int");
-        let result = ct.assert_subtype(t1, t2, sym("Orange"));
+        let t1 = &sym("SELF_TYPE");
+        let t2 = &sym("Int");
+        let result = ct.assert_subtype(t1, t2, &sym("Orange"));
         assert!(result.is_err());
     }
 
@@ -662,7 +668,7 @@ mod class_table_tests {
         ";
         let program = Program::parse(code).unwrap();
         let ct = ClassTable::new(&program.classes).unwrap();
-        let result = ct.get_lub(sym("Kiwi"), sym("Grape"));
+        let result = ct.get_lub(&sym("Kiwi"), &sym("Grape"));
         assert_eq!(result, sym("Orange"));
     }
 }

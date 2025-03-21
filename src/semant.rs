@@ -41,10 +41,10 @@ impl Class {
     pub fn semant(&mut self, ct: &ClassTable, env: &mut Env) -> Result<(), SemanticAnalysisError> {
         env.enter_scope();
 
-        env.add_binding(sym("self"), sym("SELF_TYPE"));
+        env.add_binding(&sym("self"), &sym("SELF_TYPE"));
 
         for feature in self.features.iter_mut() {
-            feature.analyze(ct, env, self.name)?;
+            feature.analyze(ct, env, &self.name)?;
         }
 
         env.exit_scope();
@@ -57,7 +57,7 @@ pub trait Analyze {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: Sym,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError>;
 }
 
@@ -66,13 +66,13 @@ impl Analyze for Feature {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: Sym,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         match self {
             Feature::Attr { name, typ, init } => {
                 init.analyze(ct, env, cls)?;
 
-                if init.stype != "No_type" && ct.assert_subtype(init.stype, *typ, cls).is_err() {
+                if init.stype != "No_type" && ct.assert_subtype(&init.stype, typ, cls).is_err() {
                     let msg = format!(
                         "Attribute {} type declared to be {}, \
                         but found type {} for initializer at {:?} ",
@@ -80,7 +80,7 @@ impl Analyze for Feature {
                     );
                     return Err(SemanticAnalysisError { msg });
                 }
-                env.add_binding(*name, *typ);
+                env.add_binding(name, typ);
             }
             Feature::Method {
                 name,
@@ -90,12 +90,12 @@ impl Analyze for Feature {
             } => {
                 env.enter_scope();
                 for formal in formals {
-                    env.add_binding(formal.name, formal.typ);
+                    env.add_binding(&formal.name, &formal.typ);
                 }
                 body.analyze(ct, env, cls)?;
                 env.exit_scope();
 
-                if ct.assert_subtype(body.stype, *typ, cls).is_err() {
+                if ct.assert_subtype(&body.stype, typ, cls).is_err() {
                     let msg = format!(
                         "Method {} type declared to be {}, but found type {} for body at {:?}",
                         name, typ, body.stype, body.span
@@ -113,10 +113,10 @@ impl Analyze for Case {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: Sym,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         env.enter_scope();
-        env.add_binding(self.id, self.typ);
+        env.add_binding(&self.id, &self.typ);
         self.expr.analyze(ct, env, cls)?;
         env.exit_scope();
         Ok(())
@@ -128,7 +128,7 @@ impl Analyze for Expr {
         &mut self,
         ct: &ClassTable,
         env: &mut Env,
-        cls: Sym,
+        cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         // Set the `self.stype` field.
         let span = self.span;
@@ -145,13 +145,13 @@ impl Analyze for Expr {
                 let callee_type = if slf.stype == sym("SELF_TYPE") {
                     cls
                 } else {
-                    slf.stype
+                    &slf.stype
                 };
 
                 let ((params, mut return_type), _) =
-                    ct.get_method_dynamic(callee_type, *method_name)?;
+                    ct.get_method_dynamic(callee_type, method_name)?;
                 if return_type == "SELF_TYPE" {
-                    return_type = slf.stype;
+                    return_type = slf.stype.clone();
                 }
                 if args.len() != params.len() {
                     let msg = format!(
@@ -167,7 +167,7 @@ impl Analyze for Expr {
                 for (next_param, arg) in args.iter_mut().enumerate() {
                     arg.analyze(ct, env, cls)?;
                     if ct
-                        .assert_subtype(arg.stype, params[next_param].typ, cls)
+                        .assert_subtype(&arg.stype, &params[next_param].typ, cls)
                         .is_err()
                     {
                         let msg = format!(
@@ -187,7 +187,7 @@ impl Analyze for Expr {
                 slf,
             } => {
                 slf.analyze(ct, env, cls)?;
-                if ct.assert_subtype(slf.stype, *typ, cls).is_err() {
+                if ct.assert_subtype(&slf.stype, typ, cls).is_err() {
                     let msg = format!(
                         "In call to {} at {:?}, static dispatch type declared to be {}, \
                         but found self expression of non sub-type {}",
@@ -196,9 +196,9 @@ impl Analyze for Expr {
                     return Err(SemanticAnalysisError { msg });
                 }
 
-                let ((params, mut return_type), _) = ct.get_method(*typ, *method_name)?;
+                let ((params, mut return_type), _) = ct.get_method(typ, method_name)?;
                 if return_type == sym("SELF_TYPE") {
-                    return_type = slf.stype;
+                    return_type = slf.stype.clone();
                 }
 
                 if args.len() != params.len() {
@@ -215,7 +215,7 @@ impl Analyze for Expr {
                 for (next_param, arg) in args.iter_mut().enumerate() {
                     arg.analyze(ct, env, cls)?;
                     if ct
-                        .assert_subtype(arg.stype, params[next_param].typ, cls)
+                        .assert_subtype(&arg.stype, &params[next_param].typ, cls)
                         .is_err()
                     {
                         let msg = format!(
@@ -239,13 +239,13 @@ impl Analyze for Expr {
                     ),
                     Some(branch) => {
                         branch.expr.analyze(ct, env, cls)?;
-                        branch.expr.stype
+                        branch.expr.stype.clone()
                     }
                 };
 
                 for case in iter {
                     case.analyze(ct, env, cls)?;
-                    lub = ct.get_lub(lub, case.expr.stype);
+                    lub = ct.get_lub(&lub, &case.expr.stype);
                 }
                 stype = lub;
             }
@@ -257,7 +257,7 @@ impl Analyze for Expr {
                 body,
             } => {
                 init.analyze(ct, env, cls)?;
-                if init.stype != sym("No_type") && ct.assert_subtype(init.stype, *typ, cls).is_err()
+                if init.stype != sym("No_type") && ct.assert_subtype(&init.stype, typ, cls).is_err()
                 {
                     let msg = format!(
                         "Let binding variable at {:?} declared to be of type {}, 
@@ -269,13 +269,13 @@ impl Analyze for Expr {
 
                 env.enter_scope();
 
-                env.add_binding(*id, *typ);
+                env.add_binding(id, typ);
 
                 body.analyze(ct, env, cls)?;
 
                 env.exit_scope();
 
-                stype = body.stype;
+                stype = body.stype.clone();
             }
 
             ExprData::Loop { pred, body } => {
@@ -306,7 +306,7 @@ impl Analyze for Expr {
                 }
                 then_expr.analyze(ct, env, cls)?;
                 else_expr.analyze(ct, env, cls)?;
-                stype = ct.get_lub(then_expr.stype, else_expr.stype);
+                stype = ct.get_lub(&then_expr.stype, &else_expr.stype);
             }
 
             ExprData::Block { exprs } => {
@@ -315,7 +315,7 @@ impl Analyze for Expr {
                 }
                 match exprs.last() {
                     Some(expr) => {
-                        stype = expr.stype;
+                        stype = expr.stype.clone();
                     }
                     None => {
                         panic!(
@@ -329,14 +329,14 @@ impl Analyze for Expr {
 
             ExprData::Assign { id, expr } => {
                 expr.analyze(ct, env, cls)?;
-                match env.lookup(*id) {
+                match env.lookup(id) {
                     None => {
                         let msg =
                             format!("At {:?}: No object named \"{}\" found in scope.", span, id);
                         return Err(SemanticAnalysisError { msg });
                     }
                     Some(var_type) => {
-                        if ct.assert_subtype(expr.stype, var_type, cls).is_err() {
+                        if ct.assert_subtype(&expr.stype, &var_type, cls).is_err() {
                             let msg = format!(
                                 "Assignment at {:?} to variable {} previously declared to 
                                 be of type {}, but assigned to non sub-type {}",
@@ -365,7 +365,7 @@ impl Analyze for Expr {
                 stype = sym("Bool");
             }
             ExprData::New { typ } => {
-                stype = *typ;
+                stype = typ.clone();
             }
             ExprData::Not { expr } => {
                 expr.analyze(ct, env, cls)?;
@@ -418,13 +418,13 @@ impl Analyze for Expr {
                     | (lhs.stype == sym("String"))
                     | (lhs.stype == sym("Bool"))
                 {
-                    comp_as_type = lhs.stype;
+                    comp_as_type = lhs.stype.clone();
                 }
                 if (rhs.stype == sym("Int"))
                     | (rhs.stype == sym("String"))
                     | (rhs.stype == sym("Bool"))
                 {
-                    comp_as_type = rhs.stype;
+                    comp_as_type = rhs.stype.clone();
                 }
                 if comp_as_type != sym("Object") && lhs.stype != rhs.stype {
                     let msg = format!(
@@ -459,7 +459,7 @@ impl Analyze for Expr {
                 }
                 stype = sym("Int");
             }
-            ExprData::Object { id } => match env.lookup(*id) {
+            ExprData::Object { id } => match env.lookup(id) {
                 None => {
                     let msg = format!("At {:?}: No object named \"{}\" found in scope.", span, id);
                     return Err(SemanticAnalysisError { msg });
@@ -509,25 +509,25 @@ mod semant_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
 
         let mut f1 = Feature::parse(c1).unwrap();
-        let result = f1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f2 = Feature::parse(c2).unwrap();
-        let result = f2.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f3 = Feature::parse(c3).unwrap();
-        let result = f3.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f3.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f4 = Feature::parse(c4).unwrap();
-        let result = f4.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f4.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut desired_env = Env::new();
-        desired_env.add_binding(sym("a"), sym("Int"));
-        desired_env.add_binding(sym("b"), sym("Banana"));
-        desired_env.add_binding(sym("c"), sym("Banana"));
+        desired_env.add_binding(&sym("a"), &sym("Int"));
+        desired_env.add_binding(&sym("b"), &sym("Banana"));
+        desired_env.add_binding(&sym("c"), &sym("Banana"));
         assert_eq!(env, desired_env);
     }
 
@@ -545,11 +545,11 @@ mod semant_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
 
         let mut f1 = Feature::parse(c1).unwrap();
-        let result = f1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result.is_err());
 
         let mut f2 = Feature::parse(c2).unwrap();
-        let result = f2.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result.is_err());
     }
 
@@ -613,11 +613,11 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Banana"));
@@ -640,11 +640,11 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result.is_err());
     }
 
@@ -671,11 +671,11 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Banana"));
@@ -698,11 +698,11 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result.is_err());
     }
 
@@ -729,11 +729,11 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Banana"));
@@ -778,11 +778,11 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Kiwi"));
@@ -811,11 +811,11 @@ mod semant_tests {
         let mut env = Env::new();
 
         let mut attr = Feature::parse(attr_cd).unwrap();
-        let result = attr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = attr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut expr = Expr::parse(expr_cd).unwrap();
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         assert_eq!(expr.stype, sym("Kiwi"));
@@ -847,7 +847,7 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
         assert_eq!(e1.stype, sym("Int"));
     }
@@ -868,9 +868,9 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result1 = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result1 = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result1, Ok(()));
-        let result2 = e2.analyze(&ct, &mut env, sym("UNUSED"));
+        let result2 = e2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result2, Ok(()));
 
         assert_eq!(e1.stype, sym("Int"));
@@ -888,7 +888,7 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result1 = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result1 = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result1.is_err());
     }
 
@@ -913,7 +913,7 @@ mod semant_tests {
         let mut expr = Expr::parse(expr_code).unwrap();
 
         let mut env = Env::new();
-        let result1 = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result1 = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result1, Ok(()));
         assert_eq!(expr.stype, sym("Banana"));
     }
@@ -928,7 +928,7 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
         assert_eq!(e1.stype, sym("String"));
     }
@@ -942,7 +942,7 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
         assert_eq!(e1.stype, sym("Bool"));
     }
@@ -957,7 +957,7 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
         assert_eq!(e1.stype, sym("Int"));
     }
@@ -972,7 +972,7 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result.is_err());
     }
 
@@ -989,11 +989,11 @@ mod semant_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
 
         let mut f1 = Feature::parse(c1).unwrap();
-        let result = f1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f2 = Feature::parse(c2).unwrap();
-        let result = f2.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let c1: &str = r#"
@@ -1008,9 +1008,9 @@ mod semant_tests {
         let mut e1 = Expr::parse(c1).unwrap();
         let mut e2 = Expr::parse(c2).unwrap();
         let mut e3 = Expr::parse(c3).unwrap();
-        let result1 = e1.analyze(&ct, &mut env, sym("UNUSED"));
-        let result2 = e2.analyze(&ct, &mut env, sym("UNUSED"));
-        let result3 = e3.analyze(&ct, &mut env, sym("UNUSED"));
+        let result1 = e1.analyze(&ct, &mut env, &sym("UNUSED"));
+        let result2 = e2.analyze(&ct, &mut env, &sym("UNUSED"));
+        let result3 = e3.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result1, Ok(()));
         assert_eq!(e1.stype, sym("Apple"));
         assert_eq!(result2, Ok(()));
@@ -1033,22 +1033,22 @@ mod semant_tests {
         let ct = ClassTable::new(&vec![]).unwrap();
 
         let mut f1 = Feature::parse(c1).unwrap();
-        let result = f1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f2 = Feature::parse(c2).unwrap();
-        let result = f2.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f2.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let mut f3 = Feature::parse(c3).unwrap();
-        let result = f3.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = f3.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
 
         let code: &str = r#"
         if c then a else b fi
         "#;
         let mut expr = Expr::parse(code).expect("Test code failed to parse");
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
         assert_eq!(expr.stype, sym("Object"));
 
@@ -1056,7 +1056,7 @@ mod semant_tests {
         if a then a else b fi
         "#;
         let mut expr = Expr::parse(code).expect("Test code failed to parse");
-        let result = expr.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = expr.analyze(&ct, &mut env, &sym("UNUSED"));
         assert!(result.is_err());
     }
 
@@ -1073,7 +1073,7 @@ mod semant_tests {
         let mut env = Env::new();
         let ct = ClassTable::new(&vec![]).unwrap();
 
-        let result = e1.analyze(&ct, &mut env, sym("UNUSED"));
+        let result = e1.analyze(&ct, &mut env, &sym("UNUSED"));
         assert_eq!(result, Ok(()));
         assert_eq!(e1.stype, sym("Int"));
     }

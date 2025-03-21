@@ -120,14 +120,14 @@ impl<'ctx> CodeGenManager<'ctx> {
         if self.ct.native_classes.contains(&typ) || self.ct.program_classes.contains(&typ) {
             return BasicTypeEnum::StructType(
                 self.context
-                    .get_struct_type(typ.as_str())
+                    .get_struct_type(&typ)
                     .unwrap_or_else(|| panic!("No struct type for {}", typ)),
             );
         }
         panic!("Unknown type {}.", typ);
     }
 
-    fn code_class_struct(&self, name: Sym) {
+    fn code_class_struct(&self, name: &Sym) {
         let mut all_attr_types = vec![BasicTypeEnum::PointerType(
             self.context.ptr_type(self.aspace),
         )];
@@ -135,11 +135,11 @@ impl<'ctx> CodeGenManager<'ctx> {
             .ct
             .get_all_attrs(name)
             .iter()
-            .map(|(_name, typ, _)| self.sym_to_llvm_type(*typ))
+            .map(|(_name, typ, _)| self.sym_to_llvm_type(typ.clone()))
             .collect();
         // vtable
         all_attr_types.extend(other_attr_types_vec);
-        let typ = self.context.get_struct_type(name.as_str()).unwrap();
+        let typ = self.context.get_struct_type(name).unwrap();
         typ.set_body(&all_attr_types, false);
     }
 
@@ -150,14 +150,14 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.declare_native_class_struct_types();
         // ...and non-native class structs types.
         for class in self.ct.program_classes.iter() {
-            self.context.opaque_struct_type(class.as_str());
+            self.context.opaque_struct_type(class);
         }
 
         // Coding of native class structs...
         self.code_native_class_structs();
         // ...and non-native class structs types.
         for class in self.ct.program_classes.iter() {
-            self.code_class_struct(*class)
+            self.code_class_struct(class)
         }
     }
 
@@ -168,24 +168,24 @@ impl<'ctx> CodeGenManager<'ctx> {
         for cls in classes {
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_declaration(cls, *method, parameters, *return_type);
+                self.code_method_declaration(&cls, method, parameters, return_type);
             }
         }
         let native_classes = self.ct.native_classes.clone();
         for cls in native_classes {
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_declaration(cls, *method, parameters, *return_type);
+                self.code_method_declaration(&cls, method, parameters, return_type);
             }
         }
     }
 
     fn code_method_declaration(
         &mut self,
-        cls: Sym,
-        method: Sym,
+        cls: &Sym,
+        method: &Sym,
         parameters: &[Formal],
-        return_type: Sym,
+        return_type: &Sym,
     ) {
         // Must add self parameter.
         let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
@@ -198,14 +198,14 @@ impl<'ctx> CodeGenManager<'ctx> {
         // set arguments names
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             arg.into_pointer_value()
-                .set_name(all_parameters[i].name.as_str());
+                .set_name(&all_parameters[i].name);
         }
     }
 
     fn get_function_type_from_signature(
         &self,
         parameters: &[Formal],
-        _return_type: Sym,
+        _return_type: &Sym,
     ) -> FunctionType<'ctx> {
         // TODO! Currently ignoring the types of args / return and treating them as generic pointers.
         let ret_type = self.context.ptr_type(self.aspace);
@@ -222,7 +222,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     //
     // VTables
 
-    fn code_vtable_array_for_class(&self, cls: Sym) -> ArrayValue<'ctx> {
+    fn code_vtable_array_for_class(&self, cls: &Sym) -> ArrayValue<'ctx> {
         let table_size: usize = self.ct.get_max_vtable_size();
 
         let mut initializer_fields = vec![];
@@ -230,7 +230,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
         for method_name in method_order.iter() {
             let resolution_class = vtable_map.get(method_name).unwrap();
-            let fn_name = method_ref(*resolution_class, *method_name);
+            let fn_name = method_ref(resolution_class, method_name);
             let fn_val = self
                 .module
                 .get_function(&fn_name)
@@ -248,7 +248,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             .const_array(&initializer_fields[..])
     }
 
-    fn code_vtable_global_for_class(&mut self, cls: Sym) {
+    fn code_vtable_global_for_class(&mut self, cls: &Sym) {
         let initializer = self.code_vtable_array_for_class(cls);
 
         let vtable_name = &format!("{}_vtable", cls);
@@ -263,11 +263,11 @@ impl<'ctx> CodeGenManager<'ctx> {
     pub fn code_vtables(&mut self) {
         let natives_classes = self.ct.native_classes.clone();
         for cls in natives_classes.iter() {
-            self.code_vtable_global_for_class(*cls);
+            self.code_vtable_global_for_class(cls);
         }
         let program_classes = self.ct.program_classes.clone();
         for cls in program_classes.iter() {
-            self.code_vtable_global_for_class(*cls);
+            self.code_vtable_global_for_class(cls);
         }
     }
 
@@ -293,7 +293,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap()
     }
 
-    fn make_code_init(&self, name: Sym, code_body: fn(&CodeGenManager<'ctx>, &str, PointerValue)) {
+    fn make_code_init(&self, name: &Sym, code_body: fn(&CodeGenManager<'ctx>, &str, PointerValue)) {
         // Takes care of boilerplate function setup and calls `code_body`.
         let self_type_inner = self.context.ptr_type(self.aspace);
         let self_type = BasicMetadataTypeEnum::PointerType(self_type_inner);
@@ -327,7 +327,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.build_store(field, ptr).unwrap();
 
         // Code Body
-        code_body(self, name.as_str(), self_ptr);
+        code_body(self, name, self_ptr);
         self.builder.build_return(None).unwrap();
         fn_val.verify(false);
     }
@@ -377,11 +377,11 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_native_inits(&self) {
-        self.make_code_init(sym("Object"), CodeGenManager::code_empty_init_body);
-        self.make_code_init(sym("IO"), CodeGenManager::code_empty_init_body);
-        self.make_code_init(sym("Int"), CodeGenManager::code_int_init_body);
-        self.make_code_init(sym("Bool"), CodeGenManager::code_bool_init_body);
-        self.make_code_init(sym("String"), CodeGenManager::code_string_init_body);
+        self.make_code_init(&sym("Object"), CodeGenManager::code_empty_init_body);
+        self.make_code_init(&sym("IO"), CodeGenManager::code_empty_init_body);
+        self.make_code_init(&sym("Int"), CodeGenManager::code_int_init_body);
+        self.make_code_init(&sym("Bool"), CodeGenManager::code_bool_init_body);
+        self.make_code_init(&sym("String"), CodeGenManager::code_string_init_body);
     }
 
     fn code_init_body_for_class(&self, class_name: &str, self_alloca: PointerValue) {
@@ -394,8 +394,9 @@ impl<'ctx> CodeGenManager<'ctx> {
             .enumerate();
         for (ind, (_, typ, init)) in attrs {
             let value = if (*init.data == ExprData::NoExpr {}) {
-                if ["Int", "Bool", "String"].contains(&typ.as_str()) {
-                    self.code_new_and_init(*typ)
+                let key: &str = &typ;
+                if ["Int", "Bool", "String"].contains(&key) {
+                    self.code_new_and_init(typ)
                 } else {
                     self.context.ptr_type(self.aspace).const_null()
                 }
@@ -412,14 +413,14 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_init_for_class(&self, name: Sym) {
-        self.make_code_init(name, CodeGenManager::code_init_body_for_class);
+        self.make_code_init(&name, CodeGenManager::code_init_body_for_class);
     }
 
     pub fn code_all_inits(&self) {
         self.code_native_inits();
 
         for class in self.ct.program_classes.iter() {
-            self.code_init_for_class(*class);
+            self.code_init_for_class(class.to_owned());
         }
     }
 
@@ -461,10 +462,10 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     fn code_method_body(
         &mut self,
-        cls: Sym,
-        method: Sym,
+        cls: &Sym,
+        method: &Sym,
         parameters: &[Formal],
-        _return_type: Sym,
+        _return_type: &Sym,
         body: &Expr,
     ) {
         let fn_name = method_ref(cls, method);
@@ -479,12 +480,12 @@ impl<'ctx> CodeGenManager<'ctx> {
         all_parameters.extend(parameters.to_owned());
         // Build Env
         for (i, arg) in fn_val.get_param_iter().enumerate() {
-            let arg_name = all_parameters[i].name.as_str();
-            let alloca = self.create_entry_block_alloca(arg_name, fn_val);
+            let arg_name = all_parameters[i].name.clone();
+            let alloca = self.create_entry_block_alloca(&arg_name, fn_val);
 
             self.builder.build_store(alloca, arg).unwrap();
 
-            self.variables.insert(all_parameters[i].name, alloca);
+            self.variables.insert(all_parameters[i].name.to_owned(), alloca);
         }
 
         let body_val = self.codegen(body);
@@ -507,7 +508,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method_name, ((parameters, return_type), _)) in methods.iter() {
                 if !skip_list.contains(method_name) {
-                    self.code_method_body(cls, *method_name, parameters, *return_type, stub);
+                    self.code_method_body(&cls, method_name, parameters, return_type, stub);
                 }
             }
         }
@@ -519,7 +520,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         for cls in classes {
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), body)) in methods.iter() {
-                self.code_method_body(cls, *method, parameters, *return_type, body);
+                self.code_method_body(&cls, method, parameters, return_type, body);
             }
         }
     }
@@ -547,7 +548,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         // self.initialize_vtables();
 
         let main_instance =
-            BasicMetadataValueEnum::PointerValue(self.code_new_and_init(sym("Main")));
+            BasicMetadataValueEnum::PointerValue(self.code_new_and_init(&sym("Main")));
 
         let main_dot_main = self.module.get_function("Main.main").unwrap();
 
@@ -565,7 +566,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     // Expr Codegen
 
     fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-        let new_ptr = self.code_new_and_init(sym("String"));
+        let new_ptr = self.code_new_and_init(&sym("String"));
 
         let pointee_ty = self.context.get_struct_type("String").unwrap();
         // set Length
@@ -590,7 +591,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
-        let new_ptr = self.code_new_and_init(sym("Int"));
+        let new_ptr = self.code_new_and_init(&sym("Int"));
 
         let field = self
             .builder
@@ -606,20 +607,20 @@ impl<'ctx> CodeGenManager<'ctx> {
         new_ptr
     }
 
-    fn code_new_and_init(&self, typ: Sym) -> PointerValue<'ctx> {
+    fn code_new_and_init(&self, typ: &Sym) -> PointerValue<'ctx> {
         let struct_type = self
             .context
-            .get_struct_type(typ.as_str())
+            .get_struct_type(typ)
             .unwrap_or_else(|| panic!("No type {} declared.", typ));
-        let malloc_name = &format!("{}_malloc", typ.as_str());
+        let malloc_name = &format!("{}_malloc", typ);
         let new_ptr = self.builder.build_malloc(struct_type, malloc_name).unwrap();
-        let init_name = &format!("{}_init", typ.as_str());
+        let init_name = &format!("{}_init", typ);
         let initializer = self
             .module
             .get_function(init_name)
-            .unwrap_or_else(|| panic!("No initializer found for type {}.", typ.as_str()));
+            .unwrap_or_else(|| panic!("No initializer found for type {}.", typ));
         let self_arg = BasicMetadataValueEnum::PointerValue(new_ptr);
-        let call_name = &format!("{}_init_call", typ.as_str());
+        let call_name = &format!("{}_init_call", typ);
         self.builder
             .build_call(initializer, &[self_arg], call_name)
             .unwrap();
@@ -643,13 +644,13 @@ impl<'ctx> CodeGenManager<'ctx> {
             }
 
             ExprData::IntConst { val } => {
-                let int_val: u64 = val.as_str().parse().unwrap();
+                let int_val: u64 = val.parse().unwrap();
 
                 let inner = self.context.i8_type().const_int(int_val, false);
                 let new_struct = self.code_new_int(inner);
                 new_struct
             }
-            ExprData::New { typ } => self.code_new_and_init(*typ),
+            ExprData::New { typ } => self.code_new_and_init(typ),
 
             ExprData::Dispatch {
                 slf,
@@ -661,7 +662,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 // The following uses the static type not the dynamic type,
                 // but the desired function will have the same tag in the vtable
                 // for all subtypes, and the same function signature.
-                let static_type = slf.stype;
+                let static_type = slf.stype.clone();
 
                 let vtable_offset: u32 = self
                     .ct
@@ -669,7 +670,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .get(&static_type)
                     .unwrap()
                     .iter()
-                    .position(|&r| r == *method_name)
+                    .position(|r| r == method_name)
                     .unwrap()
                     .try_into()
                     .unwrap();
@@ -713,14 +714,14 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 // Compile the arguments.
                 let ((parameters, return_type), _) =
-                    self.ct.get_method(static_type, *method_name).unwrap();
+                    self.ct.get_method(&static_type, method_name).unwrap();
 
                 let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
                 all_parameters.extend(parameters.to_owned());
                 let fn_type =
-                    self.get_function_type_from_signature(&all_parameters[..], return_type);
+                    self.get_function_type_from_signature(&all_parameters[..], &return_type);
 
-                let fn_name = &method_ref(sym("<Dynamic>"), *method_name);
+                let fn_name = &method_ref(&sym("<Dynamic>"), method_name);
 
                 let mut compiled_args: Vec<PointerValue> = vec![slf_arg];
                 for arg in args.iter() {
@@ -758,7 +759,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let compiled_arg = self.codegen(arg);
                     compiled_args.push(compiled_arg);
                 }
-                let fn_name = &method_ref(*typ, *method_name);
+                let fn_name = &method_ref(typ, method_name);
                 let fn_val = self.module.get_function(fn_name).unwrap();
                 let md_args: Vec<BasicMetadataValueEnum> = compiled_args
                     .into_iter()
