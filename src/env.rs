@@ -33,7 +33,7 @@ impl Env {
     pub fn lookup(&self, key: &Sym) -> Option<Sym> {
         // Start search from top of stack.
         for scope in self.stack.iter().rev() {
-            if let Some(value) = scope.get(&key) {
+            if let Some(value) = scope.get(key) {
                 return Some(value.to_owned());
             }
         }

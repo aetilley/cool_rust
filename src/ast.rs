@@ -2,7 +2,7 @@
 
 use std::fmt::Debug;
 
-use crate::symbol::{sym, intsym, strsym, Sym};
+use crate::symbol::{intsym, strsym, sym, Sym};
 
 pub fn add_one<T: Clone>(some: &Vec<T>, one: &T) -> Vec<T> {
     // Takes ownership

@@ -365,7 +365,15 @@ impl Analyze for Expr {
                 stype = sym("Bool");
             }
             ExprData::New { typ } => {
-                stype = typ.clone();
+                if ct.native_classes.contains(typ) || ct.program_classes.contains(typ) {
+                    stype = typ.clone();
+                } else {
+                    let msg = format!(
+                        "New expression at {:?} references undefined type {}",
+                        span, typ
+                    );
+                    return Err(SemanticAnalysisError { msg });
+                }
             }
             ExprData::Not { expr } => {
                 expr.analyze(ct, env, cls)?;

@@ -28,4 +28,3 @@ pub fn global_string_ref(s: &Sym) -> String {
     s.hash(&mut hasher);
     format!("string_{}", hasher.finish())
 }
-

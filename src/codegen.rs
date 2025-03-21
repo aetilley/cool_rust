@@ -225,8 +225,8 @@ impl<'ctx> CodeGenManager<'ctx> {
         let table_size: usize = self.ct.get_max_vtable_size();
 
         let mut initializer_fields = vec![];
-        let method_order = self.ct.class_method_order.get(&cls).unwrap();
-        let vtable_map = self.ct.class_vtable.get(&cls).unwrap();
+        let method_order = self.ct.class_method_order.get(cls).unwrap();
+        let vtable_map = self.ct.class_vtable.get(cls).unwrap();
         for method_name in method_order.iter() {
             let resolution_class = vtable_map.get(method_name).unwrap();
             let fn_name = method_ref(resolution_class, method_name);
@@ -294,19 +294,33 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     pub fn register_global_for_string(&mut self, s: &Sym) {
+        // Content
         let str_content = self.code_array_value_from_sym(s);
+        // Vtable
         let str_vtable_ptr = self
             .module
             .get_global(&vtable_ref(&sym("String")))
             .unwrap()
             .as_pointer_value();
-        let str_len = self
+
+        // Len as struct Int
+        let int_vtable_ptr = self
+            .module
+            .get_global(&vtable_ref(&sym("Int")))
+            .unwrap()
+            .as_pointer_value();
+        let str_len = str_content.get_type().len().into();
+        let str_len_val = self.context.i32_type().const_int(str_len, false);
+        let str_len_struct = self
             .context
-            .i32_type()
-            .const_int(str_content.get_type().len().try_into().unwrap(), false);
+            .const_struct(&[int_vtable_ptr.into(), str_len_val.into()], false);
 
         let initializer = self.context.const_struct(
-            &[str_vtable_ptr.into(), str_len.into(), str_content.into()],
+            &[
+                str_vtable_ptr.into(),
+                str_len_struct.into(),
+                str_content.into(),
+            ],
             false,
         );
 
@@ -373,7 +387,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap()
             .as_pointer_value();
 
-        let pointee_ty = self.context.get_struct_type(&name).unwrap();
+        let pointee_ty = self.context.get_struct_type(name).unwrap();
         let field = self
             .builder
             .build_struct_gep(pointee_ty, self_ptr, VTABLE_IND, "gep")
@@ -448,7 +462,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             .enumerate();
         for (ind, (_, typ, init)) in attrs {
             let value = if (*init.data == ExprData::NoExpr {}) {
-                let key: &str = &typ;
+                let key: &str = typ;
                 if ["Int", "Bool", "String"].contains(&key) {
                     self.code_new_and_init(typ)
                 } else {
@@ -493,7 +507,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         // Get String array from second field of *String
         let to_print_pointer = self
             .builder
-            .build_struct_gep(pointee_ty, arg, 1, "gep")
+            .build_struct_gep(pointee_ty, arg, STRING_CONTENT_IND, "gep")
             .unwrap();
 
         let to_print_0 = BasicMetadataValueEnum::PointerValue(to_print_pointer);
@@ -620,30 +634,30 @@ impl<'ctx> CodeGenManager<'ctx> {
     //
     // Expr Codegen
 
-    // fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-    //     let new_ptr = self.code_new_and_init(&sym("String"));
+    fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
+        let new_ptr = self.code_new_and_init(&sym("String"));
 
-    //     let pointee_ty = self.context.get_struct_type("String").unwrap();
-    //     // set Length
-    //     let value = self
-    //         .context
-    //         .i32_type()
-    //         .const_int(str_array.get_type().len() as u64, false);
-    //     let field = self
-    //         .builder
-    //         .build_struct_gep(pointee_ty, new_ptr, 0, "gep")
-    //         .unwrap();
-    //     self.builder.build_store(field, value).unwrap();
+        let pointee_ty = self.context.get_struct_type("String").unwrap();
+        // set Length
+        let value = self
+            .context
+            .i32_type()
+            .const_int(str_array.get_type().len() as u64, false);
+        let field = self
+            .builder
+            .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
+            .unwrap();
+        self.builder.build_store(field, value).unwrap();
 
-    //     // set array
-    //     let field = self
-    //         .builder
-    //         .build_struct_gep(pointee_ty, new_ptr, 1, "gep")
-    //         .unwrap();
-    //     self.builder.build_store(field, str_array).unwrap();
+        // set array
+        let field = self
+            .builder
+            .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
+            .unwrap();
+        self.builder.build_store(field, str_array).unwrap();
 
-    //     new_ptr
-    // }
+        new_ptr
+    }
 
     // fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
     //     let new_ptr = self.code_new_and_init(&sym("Int"));
@@ -653,7 +667,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     //         .build_struct_gep(
     //             self.context.get_struct_type("Int").unwrap(),
     //             new_ptr,
-    //             0,
+    //             INT_VAL_IND,
     //             "gep",
     //         )
     //         .unwrap();
@@ -695,7 +709,11 @@ impl<'ctx> CodeGenManager<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
-            ExprData::Object { id } => self.variables.get(id).unwrap().clone(),
+            ExprData::Object { id } => self
+                .variables
+                .get(id)
+                .unwrap_or_else(|| panic!("No variable \"{}\" found in scope", id))
+                .to_owned(),
             ExprData::StrConst { val } => {
                 let global_name = global_string_ref(val);
                 // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
@@ -703,6 +721,13 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .get_global(&global_name)
                     .unwrap_or_else(|| panic!("No static string found for '{}'", val))
                     .as_pointer_value()
+            }
+            ExprData::Block { exprs } => {
+                let mut result: PointerValue = self.context.ptr_type(self.aspace).const_null();
+                for expr in exprs.iter() {
+                    result = self.codegen(expr);
+                }
+                result
             }
 
             ExprData::IntConst { val } => {
@@ -859,18 +884,16 @@ impl Program {
 mod codegen_tests {
 
     use super::*;
+
     use crate::ast_parse::Parse;
 
     #[test]
     fn test_codegen_string() {
         let context = Context::create();
         let program = Program::parse("class Main{main():Object{0};};").unwrap();
-        let man = CodeGenManager::from(&context, &program);
-
         let expr = Expr::int_const("42");
-
+        let man = CodeGenManager::from(&context, &program);
         let result = man.codegen(&expr);
-
         assert_eq!(result.get_type(), man.context.ptr_type(man.aspace));
     }
 }

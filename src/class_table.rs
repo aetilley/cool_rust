@@ -106,7 +106,7 @@ impl ClassTable {
         visited: &mut HashSet<Sym>,
         class_children: &ClassChildrenTy,
     ) -> Result<(), SemanticAnalysisError> {
-        match class_children.get(&node) {
+        match class_children.get(node) {
             None => Ok(()),
             Some(children) => {
                 for child in children.iter() {
@@ -204,7 +204,7 @@ impl ClassTable {
         let mut method_order = Vec::<Sym>::new();
 
         // First add all methods for parent.
-        if let Some(parent) = class_parent.get(&cls) {
+        if let Some(parent) = class_parent.get(cls) {
             if !class_vtable.contains_key(parent) {
                 ClassTable::register_vtable_and_method_offsets_for_class(
                     parent,
@@ -226,7 +226,7 @@ impl ClassTable {
 
         // Then add methods new to this class:
         // Sorting will make testing simpler.
-        let methods = sorted(class_methods.get(&cls).unwrap().keys());
+        let methods = sorted(class_methods.get(cls).unwrap().keys());
         for method_name in methods {
             vtable.insert(method_name.clone(), cls.clone());
 
@@ -309,10 +309,10 @@ impl ClassTable {
     pub fn get_all_attrs(&self, name: &Sym) -> Vec<AttrTypeInit> {
         // Get attrs of class `name` and of all ancestors.
         let mut result = Vec::<AttrTypeInit>::new();
-        if let Some(parent) = self.class_parent.get(&name) {
+        if let Some(parent) = self.class_parent.get(name) {
             result = self.get_all_attrs(parent);
         }
-        for attr in self.class_attrs.get(&name).unwrap() {
+        for attr in self.class_attrs.get(name).unwrap() {
             result.push(attr.clone())
         }
         result
@@ -323,12 +323,12 @@ impl ClassTable {
         class_name: &Sym,
         method_name: &Sym,
     ) -> Result<MethodTy, SemanticAnalysisError> {
-        match self.class_methods.get(&class_name) {
+        match self.class_methods.get(class_name) {
             None => {
                 let msg = format!("No methods found for class {}.", class_name);
                 Err(SemanticAnalysisError { msg })
             }
-            Some(methods) => match methods.get(&method_name) {
+            Some(methods) => match methods.get(method_name) {
                 None => {
                     let msg = format!("No method {} found for class {}.", method_name, class_name);
                     Err(SemanticAnalysisError { msg })
@@ -348,7 +348,7 @@ impl ClassTable {
         }
 
         let mut next = class_name;
-        while let Some(parent) = self.class_parent.get(&next) {
+        while let Some(parent) = self.class_parent.get(next) {
             next = parent;
             match self.get_method(next, method_name) {
                 Err(_) => {
@@ -374,12 +374,12 @@ impl ClassTable {
         let mut ancestry1 = vec![t1];
         let mut ancestry2 = vec![t2];
         let mut next = t1;
-        while let Some(parent) = self.class_parent.get(&next) {
+        while let Some(parent) = self.class_parent.get(next) {
             ancestry1.push(parent);
             next = parent;
         }
         let mut next = t2;
-        while let Some(parent) = self.class_parent.get(&next) {
+        while let Some(parent) = self.class_parent.get(next) {
             ancestry2.push(parent);
             next = parent;
         }
@@ -422,7 +422,7 @@ impl ClassTable {
         }
 
         let mut next = s1;
-        while let Some(parent) = self.class_parent.get(&next) {
+        while let Some(parent) = self.class_parent.get(next) {
             if parent == s2 {
                 return Ok(());
             };
@@ -670,5 +670,33 @@ mod class_table_tests {
         let ct = ClassTable::new(&program.classes).unwrap();
         let result = ct.get_lub(&sym("Kiwi"), &sym("Grape"));
         assert_eq!(result, sym("Orange"));
+    }
+
+    #[test]
+    fn test_method_lookup() {
+        let code = r#"
+        class Apple {
+    greet() : Object {(new IO).out_string("I'm an Apple!")};
+};
+
+class Orange inherits Apple {
+    greet() : Object {(new IO).out_string("I'm an Orange")};
+};
+
+class Main {
+    main() : 
+        Object {
+        {   
+          (new A).greet();
+          (new B).greet();
+        }   
+    };  
+};
+        "#;
+
+        let program = Program::parse(code).unwrap();
+        let ct = ClassTable::new(&program.classes).unwrap();
+        let result = ct.get_method_dynamic(&sym("Apple"), &sym("greet"));
+        assert!(result.is_ok());
     }
 }

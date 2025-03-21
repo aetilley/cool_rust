@@ -8,7 +8,11 @@ use cool_rust::ast_parse::Parse;
 
 fn main() {
     let user_args: Vec<String> = env::args().collect();
-    let path = Path::new(user_args.get(1).expect("Pass the path of a file to compile."));
+    let path = Path::new(
+        user_args
+            .get(1)
+            .expect("Pass the path of a file to compile."),
+    );
     let display = path.display();
 
     let mut file = match File::open(path) {

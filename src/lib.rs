@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::mutable_key_type)]
 
 pub mod ast;
 pub mod ast_parse;
