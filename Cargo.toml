@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 logos = "0.15.0"
+assert_matches_regex = "0.1.0"
 itertools = "0.14.0"
 either = "1.15.0"
 interner = "0.2.1"

@@ -7,11 +7,9 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Linkage;
 use inkwell::module::Module;
-use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum, FunctionType};
-use inkwell::values::{
-    ArrayValue, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue,
-};
-use inkwell::AddressSpace;
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum, FunctionType, IntType};
+use inkwell::values::{ArrayValue, BasicMetadataValueEnum, BasicValueEnum, IntValue, PointerValue};
+use inkwell::{AddressSpace, IntPredicate};
 
 use crate::codegen_constants::*;
 
@@ -23,6 +21,7 @@ pub struct CodeGenManager<'ctx> {
     pub aspace: AddressSpace,
     pub ct: ClassTable,
     pub current_class: Option<Sym>,
+    pub current_fn: Option<Sym>,
 }
 
 impl<'ctx> CodeGenManager<'ctx> {
@@ -38,6 +37,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             in semantic analysis).",
         );
         let current_class = None;
+        let current_fn = None;
 
         let mut man = CodeGenManager {
             context,
@@ -47,6 +47,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             aspace,
             ct,
             current_class,
+            current_fn,
         };
 
         //
@@ -276,6 +277,29 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
+    // Global data
+    pub fn register_globals_for_boolean(&mut self, b: bool) {
+        let b_int: u64 = b.into();
+        let b_val = self.context.i32_type().const_int(b_int, false);
+        let bool_vtable_ptr = self
+            .module
+            .get_global(&vtable_ref(&sym("Bool")))
+            .unwrap()
+            .as_pointer_value();
+
+        let initializer = self
+            .context
+            .const_struct(&[bool_vtable_ptr.into(), b_val.into()], false);
+
+        let global_name = &global_bool_ref(b);
+
+        let bool_global =
+            self.module
+                .add_global(initializer.get_type(), Some(self.aspace), global_name);
+
+        bool_global.set_initializer(&initializer);
+    }
+
     pub fn register_global_for_int(&mut self, i: &Sym) {
         let i_str: &str = &i[..];
         let i_int: u64 = i_str.parse().unwrap();
@@ -339,7 +363,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         int_global.set_initializer(&initializer);
     }
 
-    // Global data
     pub fn register_globals(&mut self) {
         for i in dump_ints().iter() {
             self.register_global_for_int(i);
@@ -348,24 +371,12 @@ impl<'ctx> CodeGenManager<'ctx> {
         for s in dump_strings().iter() {
             self.register_global_for_string(s);
         }
+
+        self.register_globals_for_boolean(true);
+        self.register_globals_for_boolean(false);
     }
 
     // Class Initialization function bodies
-
-    /// Creates a new stack allocation instruction in the entry block of the function.
-    fn create_entry_block_alloca(&self, name: &str, fn_value: FunctionValue) -> PointerValue<'ctx> {
-        let builder = self.context.create_builder();
-        let entry = fn_value.get_first_basic_block().unwrap();
-
-        match entry.get_first_instruction() {
-            Some(first_instr) => builder.position_before(&first_instr),
-            None => builder.position_at_end(entry),
-        }
-
-        builder
-            .build_alloca(self.context.ptr_type(self.aspace), name)
-            .unwrap()
-    }
 
     fn make_code_init_body_wrapper(
         &self,
@@ -385,9 +396,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.position_at_end(entry);
 
         let first = fn_val.get_first_param().unwrap();
-        // let arg_name = "self";
-        // let self_alloca = self.create_entry_block_alloca(arg_name, fn_val);
-        // self.builder.build_store(self_alloca, first).unwrap();
         let self_ptr = first.into_pointer_value();
 
         // Install Vtable
@@ -564,7 +572,10 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.variables.enter_scope();
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             let arg_name = all_parameters[i].name.clone();
-            let alloca = self.create_entry_block_alloca(&arg_name, fn_val);
+            let alloca = self
+                .builder
+                .build_alloca(self.context.ptr_type(self.aspace), &arg_name)
+                .unwrap();
 
             self.builder.build_store(alloca, arg).unwrap();
 
@@ -696,6 +707,23 @@ impl<'ctx> CodeGenManager<'ctx> {
     //     new_ptr
     // }
 
+    fn malloc_new_bool_with_value(&self, value: IntValue) -> PointerValue<'ctx> {
+        let new_ptr = self.code_new_and_init(&sym("Bool"));
+
+        let field = self
+            .builder
+            .build_struct_gep(
+                self.context.get_struct_type("Bool").unwrap(),
+                new_ptr,
+                BOOL_VAL_IND,
+                "gep",
+            )
+            .unwrap();
+        self.builder.build_store(field, value).unwrap();
+
+        new_ptr
+    }
+
     fn code_new_and_init(&self, typ: &Sym) -> PointerValue<'ctx> {
         let struct_type = self
             .context
@@ -725,10 +753,61 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.context.i8_type().const_array(&array_values[..])
     }
 
-    pub fn codegen(&self, expr: &Expr) -> PointerValue {
+    fn load_int_field_from_pointer(
+        &self,
+        ptr: PointerValue<'ctx>,
+        struct_type_name: &str,
+        field_type_name: IntType<'ctx>,
+        field_offset: u32,
+    ) -> BasicValueEnum<'ctx> {
+        let field = self
+            .builder
+            .build_struct_gep(
+                self.context.get_struct_type(struct_type_name).unwrap(),
+                ptr,
+                field_offset,
+                "Field",
+            )
+            .unwrap();
+        self.builder
+            .build_load(field_type_name, field, "Field value.")
+            .unwrap()
+    }
+
+    pub fn codegen(&self, expr: &Expr) -> PointerValue<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
+            // ExprData::Eq { lhs, rhs } => {
+            //     let lhs_ptr = self.codegen(lhs);
+            //     let rhs_ptr = self.codegen(rhs);
+            //     match &lhs.stype[..] {
+            //         "Int" => {
+            //             let pointee_ty = self.module.get_struct_type("Int").unwrap();
+            //             let l_int_field = self
+            //                 .builder
+            //                 .build_struct_gep(pointee_ty, lhs_ptr, INT_VAL_IND, "Get int field")
+            //                 .unwrap();
+            //             let l_int_value = self
+            //                 .builder
+            //                 .build_load(self.context.i32_type(), l_int_field, "get int value")
+            //                 .unwrap();
+            //             let r_int_field = self
+            //                 .builder
+            //                 .build_struct_gep(pointee_ty, rhs_ptr, INT_VAL_IND, "Get int field")
+            //                 .unwrap();
+            //             let r_int_value = self
+            //                 .builder
+            //                 .build_load(self.context.i32_type(), r_int_field, "get int value")
+            //                 .unwrap();
+            //             let result_value = l_int_value == r_int_value;
+            //             let v = self.context.bool_type().const_int(result_value, false);
+            //             let result = self.malloc_new_bool_with_value(result_value);
+            //             result
+            //         }
+            //         _ => {panic!("Not yet implemented types for equality {} and {}", lhs.stype, rhs.stype);}
+            //     }
+            // }
             ExprData::Object { id } => {
                 // First check stack then in any class attributes
                 if let Some(alloc_ptr) = self.variables.lookup(id) {
@@ -798,8 +877,81 @@ impl<'ctx> CodeGenManager<'ctx> {
                 // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
                 self.module
                     .get_global(&global_name)
-                    .unwrap_or_else(|| panic!("No static string found for '{}'", val))
+                    .unwrap_or_else(|| panic!("No static int found for '{}'", val))
                     .as_pointer_value()
+            }
+            ExprData::BoolConst { val } => {
+                let global_name = global_bool_ref(*val);
+                self.module
+                    .get_global(&global_name)
+                    .unwrap_or_else(|| panic!("No static bool found for '{}'", val))
+                    .as_pointer_value()
+            }
+            ExprData::Cond {
+                pred,
+                then_expr,
+                else_expr,
+            } => {
+                let bool_struct_ptr = self.codegen(pred);
+                let pred_val = self.load_int_field_from_pointer(
+                    bool_struct_ptr,
+                    BOOL,
+                    self.context.bool_type(),
+                    BOOL_VAL_IND,
+                ).into_int_value();
+
+                let parent = self.module.get_function(&self.current_fn.as_ref().unwrap()).unwrap();
+
+                let one_const = self.context.i64_type().const_int(1, false);
+
+                // create condition by comparing without 0.0 and returning an int
+                let cond : IntValue = self
+                    .builder
+                    .build_int_compare::<IntValue>(
+                        IntPredicate::EQ,
+                        pred_val,
+                        one_const,
+                        "ifcond",
+                    )
+                    .unwrap();
+
+                // build branch
+                let then_bb = self.context.append_basic_block(parent, "then");
+                let else_bb = self.context.append_basic_block(parent, "else");
+                let cont_bb = self.context.append_basic_block(parent, "ifcont");
+
+                self.builder
+                    .build_conditional_branch(cond, then_bb, else_bb)
+                    .unwrap();
+
+                // build then block
+                self.builder.position_at_end(then_bb);
+                let then_val = self.codegen(then_expr);
+                self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+                let then_bb = self.builder.get_insert_block().unwrap();
+
+                // build else block
+                self.builder.position_at_end(else_bb);
+                let else_val = self.codegen(else_expr);
+                self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+                let else_bb = self.builder.get_insert_block().unwrap();
+
+                // emit merge block
+                self.builder.position_at_end(cont_bb);
+
+                let phi = self
+                    .builder
+                    .build_phi(self.context.f64_type(), "iftmp")
+                    .unwrap();
+
+                phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
+
+                let phi_basic = phi.as_basic_value();
+                let malloc = self.builder.build_malloc(phi_basic.get_type(), "phi ptr").unwrap();
+                self.builder.build_store(malloc, phi_basic).unwrap();
+                malloc
             }
             ExprData::New { typ } => self.code_new_and_init(typ),
 
@@ -819,7 +971,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .ct
                     .class_method_order
                     .get(&static_type)
-                    .unwrap()
+                    .unwrap_or_else(|| panic!("No methods found for type {}", static_type))
                     .iter()
                     .position(|r| r == method_name)
                     .unwrap()
@@ -951,12 +1103,48 @@ mod codegen_tests {
     use crate::ast_parse::Parse;
 
     #[test]
-    fn test_codegen_string() {
+    fn test_codegen_simplest() {
         let context = Context::create();
-        let program = Program::parse("class Main{main():Object{0};};").unwrap();
-        let expr = Expr::int_const("42");
+        let mut program = Program::parse("class Main{main():Object{0};};").unwrap();
+        program.semant().unwrap();
         let man = CodeGenManager::from(&context, &program);
-        let result = man.codegen(&expr);
-        assert_eq!(result.get_type(), man.context.ptr_type(man.aspace));
+        man.module.verify().unwrap();
+    }
+
+    #[test]
+    fn test_codegen_bool_1() {
+        let context = Context::create();
+        let mut program = Program::parse("class Main{main():Object{true};};").unwrap();
+        program.semant().unwrap();
+        let man = CodeGenManager::from(&context, &program);
+        man.module.verify().unwrap();
+    }
+
+    #[test]
+    fn test_codegen_dynamic_disp() {
+        let code = r#"
+    class Apple {
+    greet() : Object {(new IO).out_string("Hello World!")};
+};
+
+class Orange inherits Apple {
+    greet() : Object {(new IO).out_string("Hola, Mundo!")};
+};
+
+class Main {
+    a: Apple <- new Apple;
+    b: Apple <- new Orange;
+    main() : 
+    Object {{
+        a.greet();
+        b.greet();
+    }}; 
+};
+"#;
+        let context = Context::create();
+        let mut program = Program::parse(code).unwrap();
+        program.semant().unwrap();
+        let man = CodeGenManager::from(&context, &program);
+        man.module.verify().unwrap();
     }
 }
