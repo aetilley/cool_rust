@@ -1,7 +1,6 @@
-use std::collections::hash_map::HashMap;
-
 use crate::ast::{Expr, ExprData, Formal, Program};
 use crate::class_table::ClassTable;
+use crate::env::Env;
 use crate::symbol::{dump_ints, dump_strings, sym, Sym};
 use either::Either::Left;
 use inkwell::builder::Builder;
@@ -20,16 +19,17 @@ pub struct CodeGenManager<'ctx> {
     pub context: &'ctx Context,
     pub builder: Builder<'ctx>,
     pub module: Module<'ctx>,
-    pub variables: HashMap<Sym, PointerValue<'ctx>>,
+    pub variables: Env<PointerValue<'ctx>>,
     pub aspace: AddressSpace,
     pub ct: ClassTable,
+    pub current_class: Option<Sym>,
 }
 
 impl<'ctx> CodeGenManager<'ctx> {
     pub fn from(context: &'ctx Context, program: &Program) -> Self {
         let builder = context.create_builder();
         let module = context.create_module("cool_module");
-        let variables = HashMap::<Sym, PointerValue>::new();
+        let variables = Env::<PointerValue>::new();
         let aspace = AddressSpace::default();
 
         let ct = ClassTable::new(&program.classes).expect(
@@ -37,6 +37,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             from program (should have been caught \
             in semantic analysis).",
         );
+        let current_class = None;
 
         let mut man = CodeGenManager {
             context,
@@ -45,6 +46,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             variables,
             aspace,
             ct,
+            current_class,
         };
 
         //
@@ -166,24 +168,25 @@ impl<'ctx> CodeGenManager<'ctx> {
     pub fn code_all_method_declarations(&mut self) {
         let classes = self.ct.program_classes.clone();
         for cls in classes {
+            self.code_class_init_declaration(&cls);
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_declaration(&cls, method, parameters, return_type);
+                self.code_method_declaration(method_ref(&cls, method), parameters, return_type);
             }
         }
         let native_classes = self.ct.native_classes.clone();
         for cls in native_classes {
+            self.code_class_init_declaration(&cls);
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_declaration(&cls, method, parameters, return_type);
+                self.code_method_declaration(method_ref(&cls, method), parameters, return_type);
             }
         }
     }
 
     fn code_method_declaration(
         &mut self,
-        cls: &Sym,
-        method: &Sym,
+        fn_name: String,
         parameters: &[Formal],
         return_type: &Sym,
     ) {
@@ -192,13 +195,16 @@ impl<'ctx> CodeGenManager<'ctx> {
         all_parameters.extend(parameters.to_owned());
 
         let fn_type = self.get_function_type_from_signature(&all_parameters, return_type);
-        let fn_name = format!("{}.{}", cls, method);
         let fn_val = self.module.add_function(&fn_name, fn_type, None);
 
         // set arguments names
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             arg.into_pointer_value().set_name(&all_parameters[i].name);
         }
+    }
+
+    fn code_class_init_declaration(&mut self, cls: &Sym) {
+        self.code_method_declaration(init_ref(cls), &[], &sym(OBJECT))
     }
 
     fn get_function_type_from_signature(
@@ -344,7 +350,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
-    // Class Initialization functions
+    // Class Initialization function bodies
 
     /// Creates a new stack allocation instruction in the entry block of the function.
     fn create_entry_block_alloca(&self, name: &str, fn_value: FunctionValue) -> PointerValue<'ctx> {
@@ -361,14 +367,19 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap()
     }
 
-    fn make_code_init(&self, name: &Sym, code_body: fn(&CodeGenManager<'ctx>, &str, PointerValue)) {
+    fn make_code_init_body_wrapper(
+        &self,
+        name: &Sym,
+        code_body: fn(&CodeGenManager<'ctx>, &str, PointerValue),
+    ) {
         // Takes care of boilerplate function setup and calls `code_body`.
-        let self_type_inner = self.context.ptr_type(self.aspace);
-        let self_type = BasicMetadataTypeEnum::PointerType(self_type_inner);
-        let return_type = self.context.void_type();
-        let fn_type = return_type.fn_type(&[self_type], false);
-        let fn_name = &format!("{}_init", name);
-        let fn_val = self.module.add_function(fn_name, fn_type, None);
+        let fn_name = init_ref(name);
+
+        let fn_val = self
+            .module
+            .get_function(&fn_name)
+            .unwrap_or_else(|| panic!("No declaration found for {}", fn_name));
+
         let block_name = &format!("{}_entry", fn_name);
         let entry = self.context.append_basic_block(fn_val, block_name);
         self.builder.position_at_end(entry);
@@ -396,7 +407,8 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         // Code Body
         code_body(self, name, self_ptr);
-        self.builder.build_return(None).unwrap();
+        let null = self.context.ptr_type(self.aspace).const_null();
+        self.builder.build_return(Some(&null)).unwrap();
         fn_val.verify(false);
     }
 
@@ -445,11 +457,11 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_native_inits(&self) {
-        self.make_code_init(&sym("Object"), CodeGenManager::code_empty_init_body);
-        self.make_code_init(&sym("IO"), CodeGenManager::code_empty_init_body);
-        self.make_code_init(&sym("Int"), CodeGenManager::code_int_init_body);
-        self.make_code_init(&sym("Bool"), CodeGenManager::code_bool_init_body);
-        self.make_code_init(&sym("String"), CodeGenManager::code_string_init_body);
+        self.make_code_init_body_wrapper(&sym("Object"), CodeGenManager::code_empty_init_body);
+        self.make_code_init_body_wrapper(&sym("IO"), CodeGenManager::code_empty_init_body);
+        self.make_code_init_body_wrapper(&sym("Int"), CodeGenManager::code_int_init_body);
+        self.make_code_init_body_wrapper(&sym("Bool"), CodeGenManager::code_bool_init_body);
+        self.make_code_init_body_wrapper(&sym("String"), CodeGenManager::code_string_init_body);
     }
 
     fn code_init_body_for_class(&self, class_name: &str, self_alloca: PointerValue) {
@@ -471,17 +483,19 @@ impl<'ctx> CodeGenManager<'ctx> {
             } else {
                 self.codegen(init)
             };
+            let cast_ind: u32 = ind.try_into().unwrap();
+            let field_index: u32 = cast_ind + OBJECT_PREFIX_SIZE;
             let pointee_ty = self.context.get_struct_type(class_name).unwrap();
             let field = self
                 .builder
-                .build_struct_gep(pointee_ty, self_alloca, ind.try_into().unwrap(), "gep")
+                .build_struct_gep(pointee_ty, self_alloca, field_index, "gep")
                 .unwrap();
             self.builder.build_store(field, value).unwrap();
         }
     }
 
     fn code_init_for_class(&self, name: Sym) {
-        self.make_code_init(&name, CodeGenManager::code_init_body_for_class);
+        self.make_code_init_body_wrapper(&name, CodeGenManager::code_init_body_for_class);
     }
 
     pub fn code_all_inits(&self) {
@@ -547,18 +561,19 @@ impl<'ctx> CodeGenManager<'ctx> {
         let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
         all_parameters.extend(parameters.to_owned());
         // Build Env
+        self.variables.enter_scope();
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             let arg_name = all_parameters[i].name.clone();
             let alloca = self.create_entry_block_alloca(&arg_name, fn_val);
 
             self.builder.build_store(alloca, arg).unwrap();
 
-            self.variables
-                .insert(all_parameters[i].name.to_owned(), alloca);
+            self.variables.add_binding(&all_parameters[i].name, &alloca);
         }
 
         let body_val = self.codegen(body);
         self.builder.build_return(Some(&body_val)).unwrap();
+        self.variables.exit_scope();
         fn_val.verify(true);
     }
 
@@ -568,6 +583,15 @@ impl<'ctx> CodeGenManager<'ctx> {
         // TEMPORARY!  Just so we can run our program.
         let skip_list = vec![sym("out_string")];
         self.code_native_method_stubs(skip_list);
+    }
+
+    fn code_method_bodies_for_class(&mut self, cls: &Sym) {
+        let methods = self.ct.class_methods.get(cls).unwrap().clone();
+        self.current_class = Some(cls.to_owned());
+        for (method, ((parameters, return_type), body)) in methods.iter() {
+            self.code_method_body(cls, method, parameters, return_type, body);
+        }
+        self.current_class = None;
     }
 
     fn code_native_method_stubs(&mut self, skip_list: Vec<Sym>) {
@@ -584,13 +608,9 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_program_method_bodies(&mut self) {
-        // Make sure not to grab methods for native classes.
         let classes = self.ct.program_classes.clone();
         for cls in classes {
-            let methods = self.ct.class_methods.get(&cls).unwrap().clone();
-            for (method, ((parameters, return_type), body)) in methods.iter() {
-                self.code_method_body(&cls, method, parameters, return_type, body);
-            }
+            self.code_method_bodies_for_class(&cls);
         }
     }
 
@@ -709,11 +729,54 @@ impl<'ctx> CodeGenManager<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
-            ExprData::Object { id } => self
-                .variables
-                .get(id)
-                .unwrap_or_else(|| panic!("No variable \"{}\" found in scope", id))
-                .to_owned(),
+            ExprData::Object { id } => {
+                // First check stack then in any class attributes
+                if let Some(alloc_ptr) = self.variables.lookup(id) {
+                    let ptr = self
+                        .builder
+                        .build_load(self.context.ptr_type(self.aspace), alloc_ptr, "arg_ptr")
+                        .unwrap()
+                        .into_pointer_value();
+                    return ptr;
+                };
+
+                let cls = self.current_class.clone().unwrap();
+                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_all_attrs(&cls);
+                let pointee_ty = self.context.get_struct_type(&cls).unwrap();
+                if let Some(offset) = attrs.iter().position(|(name, _, _)| name == id) {
+                    let field_offset: u32 =
+                        <usize as TryInto<u32>>::try_into(offset).unwrap() + OBJECT_PREFIX_SIZE;
+                    let self_ptr_alloc = self.variables.lookup(&sym(SELF)).unwrap();
+                    let self_ptr = self
+                        .builder
+                        .build_load(
+                            self.context.ptr_type(self.aspace),
+                            self_ptr_alloc,
+                            "self_ptr",
+                        )
+                        .unwrap()
+                        .into_pointer_value();
+                    let attr_field = self
+                        .builder
+                        .build_struct_gep(
+                            pointee_ty,
+                            self_ptr,
+                            field_offset,
+                            "get attr field from objectname",
+                        )
+                        .unwrap();
+                    return self
+                        .builder
+                        .build_load(
+                            self.context.ptr_type(self.aspace),
+                            attr_field,
+                            "load attr pointer",
+                        )
+                        .unwrap()
+                        .into_pointer_value();
+                }
+                panic!("No identifier {} in scope.", id);
+            }
             ExprData::StrConst { val } => {
                 let global_name = global_string_ref(val);
                 // We may want to catch cases where the global is not found and do a malloc.  For now we panic.

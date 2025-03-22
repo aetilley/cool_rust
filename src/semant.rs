@@ -38,7 +38,11 @@ impl Program {
 }
 
 impl Class {
-    pub fn semant(&mut self, ct: &ClassTable, env: &mut Env) -> Result<(), SemanticAnalysisError> {
+    pub fn semant(
+        &mut self,
+        ct: &ClassTable,
+        env: &mut Env<Sym>,
+    ) -> Result<(), SemanticAnalysisError> {
         env.enter_scope();
 
         env.add_binding(&sym("self"), &sym("SELF_TYPE"));
@@ -56,7 +60,7 @@ pub trait Analyze {
     fn analyze(
         &mut self,
         ct: &ClassTable,
-        env: &mut Env,
+        env: &mut Env<Sym>,
         cls: &Sym,
     ) -> Result<(), SemanticAnalysisError>;
 }
@@ -65,7 +69,7 @@ impl Analyze for Feature {
     fn analyze(
         &mut self,
         ct: &ClassTable,
-        env: &mut Env,
+        env: &mut Env<Sym>,
         cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         match self {
@@ -112,7 +116,7 @@ impl Analyze for Case {
     fn analyze(
         &mut self,
         ct: &ClassTable,
-        env: &mut Env,
+        env: &mut Env<Sym>,
         cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         env.enter_scope();
@@ -127,7 +131,7 @@ impl Analyze for Expr {
     fn analyze(
         &mut self,
         ct: &ClassTable,
-        env: &mut Env,
+        env: &mut Env<Sym>,
         cls: &Sym,
     ) -> Result<(), SemanticAnalysisError> {
         // Set the `self.stype` field.

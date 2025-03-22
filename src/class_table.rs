@@ -306,6 +306,7 @@ impl ClassTable {
         })
     }
 
+    // TODO make this return Result
     pub fn get_all_attrs(&self, name: &Sym) -> Vec<AttrTypeInit> {
         // Get attrs of class `name` and of all ancestors.
         let mut result = Vec::<AttrTypeInit>::new();

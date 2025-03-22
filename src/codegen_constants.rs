@@ -1,6 +1,14 @@
 use crate::symbol::Sym;
 
+// TODO make these usize
+
+pub const SELF: &str = "self";
+pub const INIT: &str = "init";
+pub const OBJECT: &str = "Object";
+
 pub const VTABLE_IND: u32 = 0;
+
+pub const OBJECT_PREFIX_SIZE: u32 = 1;
 
 pub const INT_VAL_IND: u32 = 1;
 pub const BOOL_VAL_IND: u32 = 1;
@@ -16,6 +24,10 @@ pub fn vtable_ref(cls_name: &Sym) -> String {
 }
 
 use std::hash::{DefaultHasher, Hash, Hasher};
+
+pub fn init_ref(cls: &Sym) -> String {
+    format!("{}_init", cls)
+}
 
 pub fn global_int_ref(i: &Sym) -> String {
     let mut hasher = DefaultHasher::new();

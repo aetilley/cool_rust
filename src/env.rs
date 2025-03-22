@@ -2,23 +2,23 @@ use std::collections::hash_map::HashMap;
 
 use crate::symbol::Sym;
 
-type Scope = HashMap<Sym, Sym>;
+type Scope<Val> = HashMap<Sym, Val>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Env {
+pub struct Env<Val: Clone> {
     // A stack of local environments to keep track of what variables are in scope.
     // Since `Vec::push` pushes to the back of the vector, we will
     // use the back as the "top" of the stack.
-    stack: Vec<Scope>,
+    stack: Vec<Scope<Val>>,
 }
 
-impl Default for Env {
+impl<Val: Clone> Default for Env<Val> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Env {
+impl<Val: Clone> Env<Val> {
     pub fn new() -> Self {
         Env { stack: vec![] }
     }
@@ -30,7 +30,7 @@ impl Env {
         self.stack.pop();
     }
 
-    pub fn lookup(&self, key: &Sym) -> Option<Sym> {
+    pub fn lookup(&self, key: &Sym) -> Option<Val> {
         // Start search from top of stack.
         for scope in self.stack.iter().rev() {
             if let Some(value) = scope.get(key) {
@@ -40,7 +40,7 @@ impl Env {
         None
     }
 
-    pub fn add_binding(&mut self, key: &Sym, value: &Sym) {
+    pub fn add_binding(&mut self, key: &Sym, value: &Val) {
         // NOTE:  Currently does not Err if the key already exists
         // in the current scope. Sometimes we may want to throw an error
         // E.g. if a symbol appears twice in a function param list.
