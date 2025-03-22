@@ -3,6 +3,7 @@ use crate::symbol::Sym;
 // TODO make these usize
 pub const BOOL: &str = "Bool";
 pub const OBJECT: &str = "Object";
+pub const INT: &str = "Int";
 
 pub const SELF: &str = "self";
 pub const INIT: &str = "init";

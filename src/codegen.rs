@@ -758,7 +758,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         &self,
         ptr: PointerValue<'ctx>,
         struct_type_name: &str,
-        field_type_name: IntType<'ctx>,
+        int_type: IntType<'ctx>,
         field_offset: u32,
     ) -> BasicValueEnum<'ctx> {
         let field = self
@@ -771,44 +771,124 @@ impl<'ctx> CodeGenManager<'ctx> {
             )
             .unwrap();
         self.builder
-            .build_load(field_type_name, field, "Field value.")
+            .build_load(int_type, field, "Field value.")
             .unwrap()
+    }
+
+    fn get_bool_for_value(&self, pred: IntValue) -> PointerValue<'ctx> {
+        let then_val = self
+            .module
+            .get_global(&global_bool_ref(true))
+            .unwrap()
+            .as_pointer_value();
+
+        let else_val = self
+            .module
+            .get_global(&global_bool_ref(false))
+            .unwrap()
+            .as_pointer_value();
+
+        self.cond_builder(pred, || then_val, || else_val)
+    }
+
+    fn cond_builder<F1: Fn() -> PointerValue<'ctx>, F2: Fn() -> PointerValue<'ctx>>(
+        &self,
+        pred: IntValue,
+        then_fn: F1,
+        else_fn: F2,
+    ) -> PointerValue<'ctx> {
+        // Allows us to return the globals instead of allocating a new boolean each time.
+
+        let parent = self
+            .module
+            .get_function(self.current_fn.as_ref().unwrap())
+            .unwrap();
+
+        let then_bb = self.context.append_basic_block(parent, "then");
+        let else_bb = self.context.append_basic_block(parent, "else");
+        let cont_bb = self.context.append_basic_block(parent, "ifcont");
+
+        self.builder
+            .build_conditional_branch(pred, then_bb, else_bb)
+            .unwrap();
+
+        // build then block
+        self.builder.position_at_end(then_bb);
+        let then_val = then_fn();
+
+        self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+        let then_bb = self.builder.get_insert_block().unwrap();
+
+        // build else block
+        self.builder.position_at_end(else_bb);
+        let else_val = else_fn();
+
+        self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+        let else_bb = self.builder.get_insert_block().unwrap();
+
+        // emit merge block
+        self.builder.position_at_end(cont_bb);
+
+        let phi = self
+            .builder
+            .build_phi(self.context.ptr_type(self.aspace), "iftmp")
+            .unwrap();
+
+        phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
+
+        let phi_basic = phi.as_basic_value();
+
+        phi_basic.into_pointer_value()
     }
 
     pub fn codegen(&self, expr: &Expr) -> PointerValue<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
-            // ExprData::Eq { lhs, rhs } => {
-            //     let lhs_ptr = self.codegen(lhs);
-            //     let rhs_ptr = self.codegen(rhs);
-            //     match &lhs.stype[..] {
-            //         "Int" => {
-            //             let pointee_ty = self.module.get_struct_type("Int").unwrap();
-            //             let l_int_field = self
-            //                 .builder
-            //                 .build_struct_gep(pointee_ty, lhs_ptr, INT_VAL_IND, "Get int field")
-            //                 .unwrap();
-            //             let l_int_value = self
-            //                 .builder
-            //                 .build_load(self.context.i32_type(), l_int_field, "get int value")
-            //                 .unwrap();
-            //             let r_int_field = self
-            //                 .builder
-            //                 .build_struct_gep(pointee_ty, rhs_ptr, INT_VAL_IND, "Get int field")
-            //                 .unwrap();
-            //             let r_int_value = self
-            //                 .builder
-            //                 .build_load(self.context.i32_type(), r_int_field, "get int value")
-            //                 .unwrap();
-            //             let result_value = l_int_value == r_int_value;
-            //             let v = self.context.bool_type().const_int(result_value, false);
-            //             let result = self.malloc_new_bool_with_value(result_value);
-            //             result
-            //         }
-            //         _ => {panic!("Not yet implemented types for equality {} and {}", lhs.stype, rhs.stype);}
-            //     }
-            // }
+            ExprData::Eq { lhs, rhs } => {
+                let lhs_ptr = self.codegen(lhs);
+                let rhs_ptr = self.codegen(rhs);
+                match &lhs.stype[..] {
+                    "Int" => {
+                        let l_int_value = self
+                            .load_int_field_from_pointer(
+                                lhs_ptr,
+                                INT,
+                                self.context.i32_type(),
+                                INT_VAL_IND,
+                            )
+                            .into_int_value();
+                        let r_int_value = self
+                            .load_int_field_from_pointer(
+                                rhs_ptr,
+                                INT,
+                                self.context.i32_type(),
+                                INT_VAL_IND,
+                            )
+                            .into_int_value();
+
+                        let is_equal: IntValue = self
+                            .builder
+                            .build_int_compare::<IntValue>(
+                                IntPredicate::EQ,
+                                l_int_value,
+                                r_int_value,
+                                "ifcond",
+                            )
+                            .unwrap();
+
+                        self.get_bool_for_value(is_equal)
+                    }
+                    _ => {
+                        panic!(
+                            "Not yet implemented types for equality {} and {}",
+                            lhs.stype, rhs.stype
+                        );
+                    }
+                }
+            }
             ExprData::Object { id } => {
                 // First check stack then in any class attributes
                 if let Some(alloc_ptr) = self.variables.lookup(id) {
@@ -903,59 +983,17 @@ impl<'ctx> CodeGenManager<'ctx> {
                     )
                     .into_int_value();
 
-                let parent = self
-                    .module
-                    .get_function(self.current_fn.as_ref().unwrap())
-                    .unwrap();
-
                 let one_const = self.context.bool_type().const_int(1, false);
 
-                // create condition by comparing without 0.0 and returning an int
-                let cond: IntValue = self
+                let pred: IntValue = self
                     .builder
                     .build_int_compare::<IntValue>(IntPredicate::EQ, pred_val, one_const, "ifcond")
                     .unwrap();
 
-                // build branch
-                let then_bb = self.context.append_basic_block(parent, "then");
-                let else_bb = self.context.append_basic_block(parent, "else");
-                let cont_bb = self.context.append_basic_block(parent, "ifcont");
-
-                self.builder
-                    .build_conditional_branch(cond, then_bb, else_bb)
-                    .unwrap();
-
-                // build then block
-                self.builder.position_at_end(then_bb);
-                let then_val = self.codegen(then_expr);
-                self.builder.build_unconditional_branch(cont_bb).unwrap();
-
-                let then_bb = self.builder.get_insert_block().unwrap();
-
-                // build else block
-                self.builder.position_at_end(else_bb);
-                let else_val = self.codegen(else_expr);
-                self.builder.build_unconditional_branch(cont_bb).unwrap();
-
-                let else_bb = self.builder.get_insert_block().unwrap();
-
-                // emit merge block
-                self.builder.position_at_end(cont_bb);
-
-                let phi = self
-                    .builder
-                    .build_phi(self.context.ptr_type(self.aspace), "iftmp")
-                    .unwrap();
-
-                phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
-
-                let phi_basic = phi.as_basic_value();
-                let malloc = self
-                    .builder
-                    .build_malloc(phi_basic.get_type(), "phi ptr")
-                    .unwrap();
-                self.builder.build_store(malloc, phi_basic).unwrap();
-                malloc
+                let then_fn = || self.codegen(then_expr);
+                let else_fn = || self.codegen(else_expr);
+                let phi_ptr = self.cond_builder(pred, then_fn, else_fn);
+                phi_ptr
             }
             ExprData::New { typ } => self.code_new_and_init(typ),
 
@@ -969,12 +1007,20 @@ impl<'ctx> CodeGenManager<'ctx> {
                 // The following uses the static type not the dynamic type,
                 // but the desired function will have the same tag in the vtable
                 // for all subtypes, and the same function signature.
-                let static_type = slf.stype.clone();
+                let mut static_type = &slf.stype;
+                if static_type == &sym("SELF_TYPE") {
+                    static_type = match &self.current_class {
+                        Some(cls) => cls,
+                        _ => {
+                            panic!("");
+                        }
+                    }
+                }
 
                 let vtable_offset: u32 = self
                     .ct
                     .class_method_order
-                    .get(&static_type)
+                    .get(static_type)
                     .unwrap_or_else(|| panic!("No methods found for type {}", static_type))
                     .iter()
                     .position(|r| r == method_name)
@@ -986,7 +1032,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 // of the struct will be the layout of static_type.
                 // In fact we only need the first field which is the same in all
                 // classes.
-                let pointee_ty = self.context.get_struct_type(&static_type).unwrap();
+                let pointee_ty = self.context.get_struct_type(static_type).unwrap();
                 let vtable_pointer_field = self
                     .builder
                     .build_struct_gep(pointee_ty, slf_arg, VTABLE_IND, "get_vtable_pointer_field")
@@ -1021,7 +1067,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 // Compile the arguments.
                 let ((parameters, return_type), _) =
-                    self.ct.get_method(&static_type, method_name).unwrap();
+                    self.ct.get_method(static_type, method_name).unwrap();
 
                 let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
                 all_parameters.extend(parameters.to_owned());
@@ -1161,6 +1207,29 @@ class Main {
       if false then 42 else 43 fi
     };  
 };
+"#;
+        let context = Context::create();
+        let mut program = Program::parse(code).unwrap();
+        program.semant().unwrap();
+        let man = CodeGenManager::from(&context, &program);
+        man.module.verify().unwrap();
+    }
+
+    #[test]
+    fn test_codegen_cond_2() {
+        let code = r#"
+class Main {
+    a: Int <- 42; 
+
+    io: IO <- new IO; 
+
+    f(x: Int) : Bool {x = 42};
+
+    main() : Object {
+      if f(a) then io.out_string("YES") else io.out_string("NO") fi
+    };  
+};
+
 "#;
         let context = Context::create();
         let mut program = Program::parse(code).unwrap();

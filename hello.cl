@@ -15,4 +15,3 @@ class Main {
         b.greet();
     }};
 };
-

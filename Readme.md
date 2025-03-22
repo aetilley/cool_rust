@@ -5,7 +5,7 @@ A compiler for the Cool language written in Rust with an LLVM backend.
 
 COOL Language manual:  https://theory.stanford.edu/~aiken/software/cool/cool-manual.pdf
 
-Example Program (`simple.cl`)
+Example Program (`hello.cl`)
 
 ```
 class Apple {
@@ -30,10 +30,10 @@ class Main {
 
 Usage:
 ```
-// Compile to LLVM Intermediate Representation. (output is simple.ll)
-$ cargo run simple.cl
+// Compile to LLVM Intermediate Representation. (output is hello.ll)
+$ cargo run hello.cl
 // Compile IR file with Clang toolchain.
-$ llc simple.ll && clang simple.s -c && clang simple.o -o simple && ./simple
+$ llc hello.ll && clang hello.s -c && clang hello.o -o hello && ./hello
 Hello World!
 Hola, Mundo!
 ```
