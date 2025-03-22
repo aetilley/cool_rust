@@ -18,7 +18,6 @@ pub const BOOL_VAL_IND: u32 = 1;
 pub const STRING_LEN_IND: u32 = 1;
 pub const STRING_CONTENT_IND: u32 = 2;
 
-
 pub fn method_ref(cls_name: &Sym, method_name: &Sym) -> String {
     format!("{}.{}", cls_name, method_name)
 }
@@ -34,7 +33,7 @@ pub fn init_ref(cls: &Sym) -> String {
 }
 
 pub fn global_bool_ref(b: bool) -> String {
-    format!("bool_{}", b) 
+    format!("bool_{}", b)
 }
 
 pub fn global_int_ref(i: &Sym) -> String {

@@ -119,11 +119,11 @@ impl<'ctx> CodeGenManager<'ctx> {
         typ.set_body(string_attrs, false);
     }
 
-    fn sym_to_llvm_type(&self, typ: Sym) -> BasicTypeEnum {
-        if self.ct.native_classes.contains(&typ) || self.ct.program_classes.contains(&typ) {
+    fn sym_to_llvm_type(&self, typ: &Sym) -> BasicTypeEnum {
+        if self.ct.native_classes.contains(typ) || self.ct.program_classes.contains(typ) {
             return BasicTypeEnum::StructType(
                 self.context
-                    .get_struct_type(&typ)
+                    .get_struct_type(typ)
                     .unwrap_or_else(|| panic!("No struct type for {}", typ)),
             );
         }
@@ -138,7 +138,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             .ct
             .get_all_attrs(name)
             .iter()
-            .map(|(_name, typ, _)| self.sym_to_llvm_type(typ.clone()))
+            .map(|(_name, typ, _)| self.sym_to_llvm_type(typ))
             .collect();
         // vtable
         all_attr_types.extend(other_attr_types_vec);
@@ -280,7 +280,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     // Global data
     pub fn register_globals_for_boolean(&mut self, b: bool) {
         let b_int: u64 = b.into();
-        let b_val = self.context.i32_type().const_int(b_int, false);
+        let b_val = self.context.bool_type().const_int(b_int, false);
         let bool_vtable_ptr = self
             .module
             .get_global(&vtable_ref(&sym("Bool")))
@@ -582,6 +582,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             self.variables.add_binding(&all_parameters[i].name, &alloca);
         }
 
+        self.current_fn = Some(sym(&fn_name));
         let body_val = self.codegen(body);
         self.builder.build_return(Some(&body_val)).unwrap();
         self.variables.exit_scope();
@@ -893,26 +894,26 @@ impl<'ctx> CodeGenManager<'ctx> {
                 else_expr,
             } => {
                 let bool_struct_ptr = self.codegen(pred);
-                let pred_val = self.load_int_field_from_pointer(
-                    bool_struct_ptr,
-                    BOOL,
-                    self.context.bool_type(),
-                    BOOL_VAL_IND,
-                ).into_int_value();
+                let pred_val = self
+                    .load_int_field_from_pointer(
+                        bool_struct_ptr,
+                        BOOL,
+                        self.context.bool_type(),
+                        BOOL_VAL_IND,
+                    )
+                    .into_int_value();
 
-                let parent = self.module.get_function(&self.current_fn.as_ref().unwrap()).unwrap();
+                let parent = self
+                    .module
+                    .get_function(self.current_fn.as_ref().unwrap())
+                    .unwrap();
 
-                let one_const = self.context.i64_type().const_int(1, false);
+                let one_const = self.context.bool_type().const_int(1, false);
 
                 // create condition by comparing without 0.0 and returning an int
-                let cond : IntValue = self
+                let cond: IntValue = self
                     .builder
-                    .build_int_compare::<IntValue>(
-                        IntPredicate::EQ,
-                        pred_val,
-                        one_const,
-                        "ifcond",
-                    )
+                    .build_int_compare::<IntValue>(IntPredicate::EQ, pred_val, one_const, "ifcond")
                     .unwrap();
 
                 // build branch
@@ -943,13 +944,16 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 let phi = self
                     .builder
-                    .build_phi(self.context.f64_type(), "iftmp")
+                    .build_phi(self.context.ptr_type(self.aspace), "iftmp")
                     .unwrap();
 
                 phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
 
                 let phi_basic = phi.as_basic_value();
-                let malloc = self.builder.build_malloc(phi_basic.get_type(), "phi ptr").unwrap();
+                let malloc = self
+                    .builder
+                    .build_malloc(phi_basic.get_type(), "phi ptr")
+                    .unwrap();
                 self.builder.build_store(malloc, phi_basic).unwrap();
                 malloc
             }
@@ -1139,6 +1143,23 @@ class Main {
         a.greet();
         b.greet();
     }}; 
+};
+"#;
+        let context = Context::create();
+        let mut program = Program::parse(code).unwrap();
+        program.semant().unwrap();
+        let man = CodeGenManager::from(&context, &program);
+        man.module.verify().unwrap();
+    }
+
+    #[test]
+    fn test_codegen_cond() {
+        let code = r#"
+class Main {
+    main() : 
+    Object {
+      if false then 42 else 43 fi
+    };  
 };
 "#;
         let context = Context::create();
