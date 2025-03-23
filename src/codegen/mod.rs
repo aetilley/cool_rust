@@ -29,11 +29,8 @@ pub struct CodeGenManager<'ctx> {
 
 impl<'ctx> CodeGenManager<'ctx> {
     pub fn from(context: &'ctx Context, program: &Program) -> Self {
-        if !program.analyzed {
-            panic!(
-                "Cannot do code generation for an unanalyzed program. \
-            Do semantic analysis and retry."
-            );
+        if !program.is_analyzed {
+            panic!("Cannot do codegen on un-analyzed program.  Do semantic analysis and try again.")
         }
 
         let builder = context.create_builder();

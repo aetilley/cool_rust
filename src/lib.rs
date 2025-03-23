@@ -2,7 +2,7 @@
 #![allow(clippy::mutable_key_type)]
 
 pub mod ast;
-mod class_table;
-mod codegen;
-mod env;
-mod symbol;
+pub mod class_table;
+pub mod codegen;
+pub mod env;
+pub mod symbol;
