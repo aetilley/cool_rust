@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::ast::semant::SemanticAnalysisError;
 use crate::ast::{Class, Classes, Expr, Feature, Formal, Formals};
-use crate::semant::SemanticAnalysisError;
 
 use crate::symbol::{sym, Sym};
 
@@ -34,6 +34,118 @@ pub struct ClassTable {
 }
 
 impl ClassTable {
+    pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
+        let mut class_parent = HashMap::<Sym, Sym>::new();
+        let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
+        let mut class_attrs = HashMap::<Sym, Vec<AttrTypeInit>>::new();
+        let mut class_methods = HashMap::<Sym, HashMap<Sym, MethodTy>>::new();
+
+        let program_classes = classes.to_owned();
+        let native_classes = ClassTable::create_native_classes();
+        let mut all_classes = native_classes.clone();
+        all_classes.extend_from_slice(&program_classes[..]);
+
+        for class in all_classes.iter() {
+            ClassTable::register_attrs_methods_and_relatives(
+                class,
+                &mut class_methods,
+                &mut class_attrs,
+                &mut class_parent,
+                &mut class_children,
+            )?;
+        }
+
+        ClassTable::detect_cycles(&class_children)?;
+
+        let all_class_names: ClassesTy = all_classes.iter().map(|cls| cls.name.clone()).collect();
+        let program_class_names: ClassesTy =
+            program_classes.iter().map(|cls| cls.name.clone()).collect();
+        let native_class_names: ClassesTy =
+            native_classes.iter().map(|cls| cls.name.clone()).collect();
+
+        let mut class_vtable = HashMap::<Sym, VTableTy>::new();
+        let mut class_method_order = HashMap::<Sym, MethodOrderTy>::new();
+
+        for cls in all_class_names.iter() {
+            ClassTable::register_vtable_and_method_offsets_for_class(
+                cls,
+                &class_parent,
+                &class_methods,
+                &mut class_vtable,
+                &mut class_method_order,
+            );
+        }
+
+        //let native_class_names = native_classes.map
+        Ok(ClassTable {
+            native_classes: native_class_names,
+            program_classes: program_class_names,
+            class_parent,
+            class_children,
+            class_methods,
+            class_attrs,
+            class_vtable,
+            class_method_order,
+        })
+    }
+
+    fn register_attrs_methods_and_relatives(
+        class: &Class,
+        class_methods: &mut ClassMethodTy,
+        class_attrs: &mut ClassAttrTy,
+        class_parent: &mut ClassParentTy,
+        class_children: &mut ClassChildrenTy,
+    ) -> Result<(), SemanticAnalysisError> {
+        if [sym("Int"), sym("String"), sym("Bool")].contains(&class.parent) {
+            let msg = format!(
+                "Illegal inheritance of {} from {}",
+                class.name, class.parent
+            );
+
+            return Err(SemanticAnalysisError { msg });
+        }
+        if class.parent != "No_class" {
+            // Register parent
+            class_parent.insert(class.name.clone(), class.parent.clone());
+            // Register children
+            class_children
+                .entry(class.parent.clone())
+                .and_modify(|children| {
+                    children.insert(class.name.clone());
+                })
+                .or_insert(hash_set! {class.name.clone()});
+            class_children
+                .entry(class.name.clone())
+                .or_insert(hash_set! {});
+        }
+
+        let mut attrs = Vec::<AttrTypeInit>::new();
+        let mut methods = HashMap::<Sym, MethodTy>::new();
+
+        for feature in class.features.iter() {
+            match feature {
+                Feature::Method {
+                    name,
+                    formals,
+                    typ,
+                    body,
+                } => {
+                    let signature = (formals.clone(), typ.clone());
+                    let method = (signature, body.clone());
+                    methods.insert(name.clone(), method);
+                }
+                Feature::Attr { name, typ, init } => {
+                    attrs.push((name.clone(), typ.clone(), init.clone()));
+                }
+            }
+        }
+
+        class_methods.insert(class.name.clone(), methods);
+        class_attrs.insert(class.name.clone(), attrs);
+
+        Ok(())
+    }
+
     fn create_native_classes() -> Classes {
         // The bodies below are empty, since they will be supplied by the runtime.
         let mut native_classes: Classes = vec![];
@@ -148,51 +260,6 @@ impl ClassTable {
         Ok(())
     }
 
-    fn register_attrs_methods_and_relatives(
-        class: &Class,
-        class_methods: &mut ClassMethodTy,
-        class_attrs: &mut ClassAttrTy,
-        class_parent: &mut ClassParentTy,
-        class_children: &mut ClassChildrenTy,
-    ) {
-        if class.parent != "No_class" {
-            class_parent.insert(class.name.clone(), class.parent.clone());
-            class_children
-                .entry(class.parent.clone())
-                .and_modify(|children| {
-                    children.insert(class.name.clone());
-                })
-                .or_insert(hash_set! {class.name.clone()});
-            class_children
-                .entry(class.name.clone())
-                .or_insert(hash_set! {});
-        }
-
-        let mut attrs = Vec::<AttrTypeInit>::new();
-        let mut methods = HashMap::<Sym, MethodTy>::new();
-
-        for feature in class.features.iter() {
-            match feature {
-                Feature::Method {
-                    name,
-                    formals,
-                    typ,
-                    body,
-                } => {
-                    let signature = (formals.clone(), typ.clone());
-                    let method = (signature, body.clone());
-                    methods.insert(name.clone(), method);
-                }
-                Feature::Attr { name, typ, init } => {
-                    attrs.push((name.clone(), typ.clone(), init.clone()));
-                }
-            }
-        }
-
-        class_methods.insert(class.name.clone(), methods);
-        class_attrs.insert(class.name.clone(), attrs);
-    }
-
     fn register_vtable_and_method_offsets_for_class(
         cls: &Sym,
         class_parent: &ClassParentTy,
@@ -249,61 +316,6 @@ impl ClassTable {
             .map(|vtable| vtable.len())
             .max()
             .unwrap()
-    }
-
-    pub fn new(classes: &Classes) -> Result<ClassTable, SemanticAnalysisError> {
-        let mut class_parent = HashMap::<Sym, Sym>::new();
-        let mut class_children = HashMap::<Sym, HashSet<Sym>>::new();
-        let mut class_attrs = HashMap::<Sym, Vec<AttrTypeInit>>::new();
-        let mut class_methods = HashMap::<Sym, HashMap<Sym, MethodTy>>::new();
-
-        let program_classes = classes.to_owned();
-        let native_classes = ClassTable::create_native_classes();
-        let mut all_classes = native_classes.clone();
-        all_classes.extend_from_slice(&program_classes[..]);
-
-        for class in all_classes.iter() {
-            ClassTable::register_attrs_methods_and_relatives(
-                class,
-                &mut class_methods,
-                &mut class_attrs,
-                &mut class_parent,
-                &mut class_children,
-            );
-        }
-
-        ClassTable::detect_cycles(&class_children)?;
-
-        let all_class_names: ClassesTy = all_classes.iter().map(|cls| cls.name.clone()).collect();
-        let program_class_names: ClassesTy =
-            program_classes.iter().map(|cls| cls.name.clone()).collect();
-        let native_class_names: ClassesTy =
-            native_classes.iter().map(|cls| cls.name.clone()).collect();
-
-        let mut class_vtable = HashMap::<Sym, VTableTy>::new();
-        let mut class_method_order = HashMap::<Sym, MethodOrderTy>::new();
-
-        for cls in all_class_names.iter() {
-            ClassTable::register_vtable_and_method_offsets_for_class(
-                cls,
-                &class_parent,
-                &class_methods,
-                &mut class_vtable,
-                &mut class_method_order,
-            );
-        }
-
-        //let native_class_names = native_classes.map
-        Ok(ClassTable {
-            native_classes: native_class_names,
-            program_classes: program_class_names,
-            class_parent,
-            class_children,
-            class_methods,
-            class_attrs,
-            class_vtable,
-            class_method_order,
-        })
     }
 
     // TODO make this return Result
@@ -439,8 +451,8 @@ impl ClassTable {
 mod class_table_tests {
 
     use super::*;
+    use crate::ast::parse::Parse;
     use crate::ast::Program;
-    use crate::ast_parse::Parse;
     use common_macros::hash_map;
 
     #[test]
@@ -652,6 +664,16 @@ mod class_table_tests {
         class Lemon inherits Orange {};
         class Grape inherits Lemon {};
         class Kiwi inherits Orange {};
+        ";
+        let program = Program::parse(code).unwrap();
+        let result = ClassTable::new(&program.classes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_on_inherit_from_native() {
+        let code: &str = r"
+        class Apple inherits Int {};
         ";
         let program = Program::parse(code).unwrap();
         let result = ClassTable::new(&program.classes);

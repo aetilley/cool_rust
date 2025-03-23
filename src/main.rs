@@ -4,7 +4,6 @@ use std::io::Read;
 use std::path::Path;
 
 use cool_rust::ast::Program;
-use cool_rust::ast_parse::Parse;
 
 fn main() {
     let user_args: Vec<String> = env::args().collect();
@@ -26,7 +25,7 @@ fn main() {
     }
 
     // Tokenize and Parse
-    let mut program: Program = Program::parse(&code).expect("Main program did not parse");
+    let mut program: Program = Program::parse_from(&code).expect("Main program did not parse");
 
     // Semantic analysis.
     program.semant().expect("Program did not typecheck");

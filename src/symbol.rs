@@ -20,7 +20,7 @@ pub fn sym(s: &str) -> Sym {
     SPECIAL.get(s)
 }
 
-pub fn dump_syms() -> Vec<Sym> {
+pub fn dump_special() -> Vec<Sym> {
     SPECIAL.pooled()
 }
 

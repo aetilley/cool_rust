@@ -1,14 +1,15 @@
-pub mod codegen_constants;
-pub mod codegen_expr;
-pub mod codegen_functions;
-pub mod codegen_globals;
-pub mod codegen_structs;
-pub mod codegen_utils;
+mod codegen_constants;
+mod codegen_expr;
+mod codegen_functions;
+mod codegen_globals;
+mod codegen_structs;
+mod codegen_utils;
 
 use crate::ast::Program;
 use crate::class_table::ClassTable;
 use crate::env::Env;
 use crate::symbol::Sym;
+
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -28,6 +29,13 @@ pub struct CodeGenManager<'ctx> {
 
 impl<'ctx> CodeGenManager<'ctx> {
     pub fn from(context: &'ctx Context, program: &Program) -> Self {
+        if !program.analyzed {
+            panic!(
+                "Cannot do code generation for an unanalyzed program. \
+            Do semantic analysis and retry."
+            );
+        }
+
         let builder = context.create_builder();
         let module = context.create_module("cool_module");
         let variables = Env::<PointerValue>::new();
@@ -84,7 +92,16 @@ mod codegen_tests {
 
     use super::*;
 
-    use crate::ast_parse::Parse;
+    use crate::ast::parse::Parse;
+
+    #[test]
+    #[should_panic]
+    fn test_codegen_needs_semant() {
+        let context = Context::create();
+        let program = Program::parse("class Main{main():Object{0};};").unwrap();
+        // Should panic due to program being unanalyzed.
+        CodeGenManager::from(&context, &program);
+    }
 
     #[test]
     fn test_codegen_simplest() {
