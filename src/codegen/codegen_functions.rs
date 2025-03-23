@@ -4,8 +4,8 @@ use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, FunctionType};
 use inkwell::values::{BasicMetadataValueEnum, PointerValue};
 
+use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
-use crate::codegen_constants::*;
 
 // Code function stubs.
 impl<'ctx> CodeGenManager<'ctx> {

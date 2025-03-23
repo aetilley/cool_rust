@@ -1,3 +1,10 @@
+pub mod codegen_constants;
+pub mod codegen_expr;
+pub mod codegen_functions;
+pub mod codegen_globals;
+pub mod codegen_structs;
+pub mod codegen_utils;
+
 use crate::ast::Program;
 use crate::class_table::ClassTable;
 use crate::env::Env;

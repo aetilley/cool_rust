@@ -1,5 +1,5 @@
+use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
-use crate::codegen_constants::*;
 use crate::symbol::{dump_ints, dump_strings, sym, Sym};
 
 use inkwell::values::ArrayValue;

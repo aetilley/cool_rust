@@ -7,8 +7,8 @@ use inkwell::types::IntType;
 use inkwell::values::{ArrayValue, BasicMetadataValueEnum, BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
 
+use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
-use crate::codegen_constants::*;
 
 impl<'ctx> CodeGenManager<'ctx> {
     fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
