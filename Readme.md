@@ -37,3 +37,5 @@ $ llc hello.ll && clang hello.s -c && clang hello.o -o hello && ./hello
 Hello World!
 Hola, Mundo!
 ```
+
+Note this package requires LLVM (version <= 18 for now, but keep an eye on https://github.com/TheDan64/inkwell/pull/557). Furthermore, running the full test suite requires that you have an LLVM_PATH environment variable set, and that it points to a directory that contains a `bin/llvm[@version]` and a `bin/clang`.

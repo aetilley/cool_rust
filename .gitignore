@@ -1,4 +1,10 @@
 *.swp
 *.swo
 *.lock
+*.cl
+*.o
+*.s
+*.ll
+*.out
+*.c
 target

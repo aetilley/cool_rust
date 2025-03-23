@@ -1,13 +1,12 @@
 #![allow(clippy::self_named_constructors)]
 
-
-pub mod token;
-pub mod token_utils;
 pub mod parse;
 pub mod semant;
+pub mod token;
+pub mod token_utils;
 
 use lalrpop_util::lalrpop_mod;
-lalrpop_mod!(cool_grammar,"/ast/cool_grammar.rs");
+lalrpop_mod!(cool_grammar, "/ast/cool_grammar.rs");
 
 use std::fmt::Debug;
 
@@ -23,11 +22,14 @@ pub fn add_one<T: Clone>(some: &Vec<T>, one: &T) -> Vec<T> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     pub classes: Classes,
-    pub is_analyzed: bool
+    pub is_analyzed: bool,
 }
 impl Program {
     pub fn program(classes: Classes) -> Program {
-        Program { classes, is_analyzed: false }
+        Program {
+            classes,
+            is_analyzed: false,
+        }
     }
 }
 

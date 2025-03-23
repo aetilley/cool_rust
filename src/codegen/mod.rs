@@ -30,7 +30,9 @@ pub struct CodeGenManager<'ctx> {
 impl<'ctx> CodeGenManager<'ctx> {
     pub fn from(context: &'ctx Context, program: &Program) -> Self {
         if !program.is_analyzed {
-            panic!("Cannot do codegen on un-analyzed program.  Do semantic analysis and try again.")
+            panic!(
+                "Cannot do codegen on un-analyzed program.  Do semantic analysis and try again."
+            );
         }
 
         let builder = context.create_builder();
@@ -84,38 +86,60 @@ impl Program {
     }
 }
 
+// Not sure why, but clipply complains about `serial` being unused.
+#[allow(unused_imports)]
+use serial_test::serial;
+
 #[cfg(test)]
+#[serial]
 mod codegen_tests {
 
     use super::*;
 
     use crate::ast::parse::Parse;
 
-    #[test]
-    #[should_panic]
-    fn test_codegen_needs_semant() {
-        let context = Context::create();
-        let program = Program::parse("class Main{main():Object{0};};").unwrap();
-        // Should panic due to program being unanalyzed.
-        CodeGenManager::from(&context, &program);
+    use assert_cmd::prelude::*;
+    use predicates::prelude::*;
+    use std::process::Command;
+    use std::{env, fs};
+
+    fn compile_run_assert_output_eq(code: &str, output: &str) {
+        let llvm_dir = env::var("LLVM_PATH").unwrap();
+        let llc_path = format!("{}/bin/llc", llvm_dir);
+        let clang_path = format!("{}/bin/clang", llvm_dir);
+        let crate_root = std::env::current_dir().unwrap().display().to_string();
+        let binary_path = format!("{}/test_tmp", crate_root);
+
+        let mut program = Program::parse(code).unwrap();
+        program.semant().unwrap();
+        program.to_llvm("test_tmp.ll");
+
+        Command::new(llc_path).arg("test_tmp.ll").assert().success();
+        Command::new(clang_path.clone())
+            .arg("test_tmp.s")
+            .arg("-c")
+            .assert()
+            .success();
+        Command::new(clang_path)
+            .arg("test_tmp.o")
+            .arg("-o")
+            .arg("test_tmp")
+            .assert()
+            .success();
+        Command::new(binary_path.clone())
+            .assert()
+            .stdout(predicate::str::contains(output));
+
+        fs::remove_file("test_tmp").unwrap();
+        fs::remove_file("test_tmp.o").unwrap();
+        fs::remove_file("test_tmp.s").unwrap();
+        fs::remove_file("test_tmp.ll").unwrap();
     }
 
     #[test]
     fn test_codegen_simplest() {
-        let context = Context::create();
-        let mut program = Program::parse("class Main{main():Object{0};};").unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
-    }
-
-    #[test]
-    fn test_codegen_bool_1() {
-        let context = Context::create();
-        let mut program = Program::parse("class Main{main():Object{true};};").unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
+        let code = "class Main{main():Object{0};};";
+        compile_run_assert_output_eq(code, "");
     }
 
     #[test]
@@ -127,7 +151,7 @@ mod codegen_tests {
 };
 
 class Orange inherits Apple {
-    greet() : Object {(new IO).out_string("Hola, Mundo!")};
+    greet() : Object {(new IO).out_string("Hola Mundo!")};
 };
 
 class Main {
@@ -140,11 +164,7 @@ class Main {
     }}; 
 };
 "#;
-        let context = Context::create();
-        let mut program = Program::parse(code).unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
+        compile_run_assert_output_eq(code, "Hello World!\nHola Mundo!");
     }
 
     #[test]
@@ -153,15 +173,11 @@ class Main {
 class Main {
     main() : 
     Object {
-      if false then 42 else 43 fi
+      if false then (new IO).out_string("YES") else (new IO).out_string("NO") fi
     };  
 };
 "#;
-        let context = Context::create();
-        let mut program = Program::parse(code).unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
+        compile_run_assert_output_eq(code, "NO");
     }
 
     #[test]
@@ -177,11 +193,8 @@ class Main {
 };
 
 "#;
-        let context = Context::create();
-        let mut program = Program::parse(code).unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
+
+        compile_run_assert_output_eq(code, "YES");
     }
     #[test]
     fn test_codegen_int_equality() {
@@ -193,11 +206,8 @@ class Main {
     };  
 };
 "#;
-        let context = Context::create();
-        let mut program = Program::parse(code).unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
+
+        compile_run_assert_output_eq(code, "YES");
     }
 
     #[test]
@@ -210,11 +220,7 @@ class Main {
     };  
 };
 "#;
-        let context = Context::create();
-        let mut program = Program::parse(code).unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
+        compile_run_assert_output_eq(code, "NO");
     }
 
     #[test]
@@ -229,10 +235,7 @@ class Main {
     };  
 };
 "#;
-        let context = Context::create();
-        let mut program = Program::parse(code).unwrap();
-        program.semant().unwrap();
-        let man = CodeGenManager::from(&context, &program);
-        man.module.verify().unwrap();
+
+        compile_run_assert_output_eq(code, "YES");
     }
 }
