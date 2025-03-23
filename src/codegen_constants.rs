@@ -2,8 +2,10 @@ use crate::symbol::Sym;
 
 // TODO make these usize
 pub const BOOL: &str = "Bool";
+pub const IO: &str = "IO";
 pub const OBJECT: &str = "Object";
 pub const INT: &str = "Int";
+pub const STRING: &str = "String";
 
 pub const SELF: &str = "self";
 pub const INIT: &str = "init";

@@ -9,7 +9,7 @@ Example Program (`hello.cl`)
 
 ```
 class Apple {
-    greet() : Object {(new IO).out_string("Hello World!")};
+    greet() : Object {(new IO).out_string("Hello, World!")};
 };
 
 class Orange inherits Apple {

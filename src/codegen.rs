@@ -550,6 +550,16 @@ impl<'ctx> CodeGenManager<'ctx> {
             .add_function("puts", puts_type, Some(Linkage::External));
     }
 
+    fn declare_strcmp(&self) {
+        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
+        let puts_type = self
+            .context
+            .i32_type()
+            .fn_type(&[input_type, input_type], false);
+        self.module
+            .add_function("strcmp", puts_type, Some(Linkage::External));
+    }
+
     fn code_method_body(
         &mut self,
         cls: &Sym,
@@ -591,6 +601,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     fn code_native_method_bodies(&mut self) {
         self.declare_puts();
+        self.declare_strcmp();
         self.code_io_out_string();
         // TEMPORARY!  Just so we can run our program.
         let skip_list = vec![sym("out_string")];
@@ -754,13 +765,14 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.context.i8_type().const_array(&array_values[..])
     }
 
-    fn load_int_field_from_pointer(
+    fn load_int_field_from_pointer_at_struct(
         &self,
         ptr: PointerValue<'ctx>,
         struct_type_name: &str,
         int_type: IntType<'ctx>,
         field_offset: u32,
     ) -> BasicValueEnum<'ctx> {
+        // Basically just a helper function to do a gep then a load.
         let field = self
             .builder
             .build_struct_gep(
@@ -774,6 +786,28 @@ impl<'ctx> CodeGenManager<'ctx> {
             .build_load(int_type, field, "Field value.")
             .unwrap()
     }
+
+    // fn load_array_field_from_pointer_at_struct(
+    //     &self,
+    //     ptr: PointerValue<'ctx>,
+    //     struct_type_name: &str,
+    //     array_type: ArrayType<'ctx>,
+    //     field_offset: u32,
+    // ) -> BasicValueEnum<'ctx> {
+    //     // Basically just a helper function to do a gep then a load.
+    //     let field = self
+    //         .builder
+    //         .build_struct_gep(
+    //             self.context.get_struct_type(struct_type_name).unwrap(),
+    //             ptr,
+    //             field_offset,
+    //             "Field",
+    //         )
+    //         .unwrap();
+    //     self.builder
+    //         .build_load(array_type, field, "Field value.")
+    //         .unwrap()
+    // }
 
     fn get_bool_for_value(&self, pred: IntValue) -> PointerValue<'ctx> {
         let then_val = self
@@ -850,43 +884,109 @@ impl<'ctx> CodeGenManager<'ctx> {
             ExprData::Eq { lhs, rhs } => {
                 let lhs_ptr = self.codegen(lhs);
                 let rhs_ptr = self.codegen(rhs);
-                match &lhs.stype[..] {
-                    "Int" => {
-                        let l_int_value = self
-                            .load_int_field_from_pointer(
-                                lhs_ptr,
-                                INT,
-                                self.context.i32_type(),
-                                INT_VAL_IND,
-                            )
-                            .into_int_value();
-                        let r_int_value = self
-                            .load_int_field_from_pointer(
-                                rhs_ptr,
-                                INT,
-                                self.context.i32_type(),
-                                INT_VAL_IND,
-                            )
-                            .into_int_value();
+                let stype = &lhs.stype[..];
+                if stype == INT || stype == BOOL {
+                    let field_ind = if stype == INT {
+                        INT_VAL_IND
+                    } else {
+                        BOOL_VAL_IND
+                    };
+                    let l_int_value = self
+                        .load_int_field_from_pointer_at_struct(
+                            lhs_ptr,
+                            stype,
+                            self.context.i32_type(),
+                            field_ind,
+                        )
+                        .into_int_value();
+                    let r_int_value = self
+                        .load_int_field_from_pointer_at_struct(
+                            rhs_ptr,
+                            stype,
+                            self.context.i32_type(),
+                            field_ind,
+                        )
+                        .into_int_value();
 
-                        let is_equal: IntValue = self
-                            .builder
-                            .build_int_compare::<IntValue>(
-                                IntPredicate::EQ,
-                                l_int_value,
-                                r_int_value,
-                                "ifcond",
-                            )
-                            .unwrap();
+                    let are_equal: IntValue = self
+                        .builder
+                        .build_int_compare::<IntValue>(
+                            IntPredicate::EQ,
+                            l_int_value,
+                            r_int_value,
+                            "ifcond",
+                        )
+                        .unwrap();
 
-                        self.get_bool_for_value(is_equal)
-                    }
-                    _ => {
-                        panic!(
-                            "Not yet implemented types for equality {} and {}",
-                            lhs.stype, rhs.stype
-                        );
-                    }
+                    self.get_bool_for_value(are_equal)
+                } else if stype == STRING {
+                    let l_array_field = self
+                        .builder
+                        .build_struct_gep(
+                            self.context.get_struct_type(STRING).unwrap(),
+                            lhs_ptr,
+                            STRING_CONTENT_IND,
+                            "left string array field",
+                        )
+                        .unwrap();
+                    let r_array_field = self
+                        .builder
+                        .build_struct_gep(
+                            self.context.get_struct_type(STRING).unwrap(),
+                            rhs_ptr,
+                            STRING_CONTENT_IND,
+                            "right string array field",
+                        )
+                        .unwrap();
+
+                    let strcmp_return = self
+                        .builder
+                        .build_call(
+                            self.module
+                                .get_function("strcmp")
+                                .expect("No function named \"strcmp\" "),
+                            &[l_array_field.into(), r_array_field.into()],
+                            "are_equal_i32",
+                        )
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_int_value();
+
+                    let are_equal: IntValue = self
+                        .builder
+                        .build_int_compare::<IntValue>(
+                            IntPredicate::EQ,
+                            strcmp_return,
+                            self.context.i32_type().const_zero(),
+                            "are_equal_i1",
+                        )
+                        .unwrap();
+
+                    self.get_bool_for_value(are_equal)
+                } else {
+                    let lhs_to_int = self
+                        .builder
+                        .build_ptr_to_int(lhs_ptr, self.context.i64_type(), "lhs_ptr to int")
+                        .unwrap();
+                    let rhs_to_int = self
+                        .builder
+                        .build_ptr_to_int(rhs_ptr, self.context.i64_type(), "rhs_ptr to int")
+                        .unwrap();
+
+                    // Default to pointer equality.
+                    let are_equal: IntValue = self
+                        .builder
+                        .build_int_compare::<IntValue>(
+                            IntPredicate::EQ,
+                            lhs_to_int,
+                            rhs_to_int,
+                            "pointers_are_equal",
+                        )
+                        .unwrap();
+
+                    self.get_bool_for_value(are_equal)
                 }
             }
             ExprData::Object { id } => {
@@ -975,7 +1075,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             } => {
                 let bool_struct_ptr = self.codegen(pred);
                 let pred_val = self
-                    .load_int_field_from_pointer(
+                    .load_int_field_from_pointer_at_struct(
                         bool_struct_ptr,
                         BOOL,
                         self.context.bool_type(),
@@ -1174,7 +1274,8 @@ mod codegen_tests {
     fn test_codegen_dynamic_disp() {
         let code = r#"
     class Apple {
-    greet() : Object {(new IO).out_string("Hello World!")};
+    greet() : Object {
+    (new IO).out_string("Hello World!")};
 };
 
 class Orange inherits Apple {
@@ -1216,20 +1317,69 @@ class Main {
     }
 
     #[test]
-    fn test_codegen_cond_2() {
+    fn test_codegen_function_read_param_return_value() {
         let code = r#"
 class Main {
     a: Int <- 42; 
-
     io: IO <- new IO; 
-
     f(x: Int) : Bool {x = 42};
-
     main() : Object {
       if f(a) then io.out_string("YES") else io.out_string("NO") fi
     };  
 };
 
+"#;
+        let context = Context::create();
+        let mut program = Program::parse(code).unwrap();
+        program.semant().unwrap();
+        let man = CodeGenManager::from(&context, &program);
+        man.module.verify().unwrap();
+    }
+    #[test]
+    fn test_codegen_int_equality() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    main() : Object {
+      if 42 = 42 then io.out_string("YES") else io.out_string("NO") fi
+    };  
+};
+"#;
+        let context = Context::create();
+        let mut program = Program::parse(code).unwrap();
+        program.semant().unwrap();
+        let man = CodeGenManager::from(&context, &program);
+        man.module.verify().unwrap();
+    }
+
+    #[test]
+    fn test_codegen_function_string_equality() {
+        let code = r#"
+        class Main {
+    io: IO <- new IO; 
+    main() : Object {
+          if "hello" = "bye" then io.out_string("YES") else io.out_string("NO") fi
+    };  
+};
+"#;
+        let context = Context::create();
+        let mut program = Program::parse(code).unwrap();
+        program.semant().unwrap();
+        let man = CodeGenManager::from(&context, &program);
+        man.module.verify().unwrap();
+    }
+
+    #[test]
+    fn test_codegen_function_pointer_equality() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    io1: IO <- new IO; 
+    io2: IO <- new IO; 
+    main() : Object {
+          if io2 = io2 then io.out_string("YES") else io.out_string("NO") fi
+    };  
+};
 "#;
         let context = Context::create();
         let mut program = Program::parse(code).unwrap();
