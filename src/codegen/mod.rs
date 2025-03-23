@@ -31,7 +31,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     pub fn from(context: &'ctx Context, program: &Program) -> Self {
         if !program.is_analyzed {
             panic!(
-                "Cannot do codegen on un-analyzed program.  Do semantic analysis and try again."
+                "Cannot do codegen on un-analyzed program.  Run semantic analysis and try again."
             );
         }
 
@@ -172,12 +172,13 @@ class Main {
         let code = r#"
 class Main {
     main() : 
-    Object {
-      if false then (new IO).out_string("YES") else (new IO).out_string("NO") fi
-    };  
+    Object {{
+      if false then (new IO).out_string("YES") else (new IO).out_string("NO") fi;
+      if true then (new IO).out_string("YES") else (new IO).out_string("NO") fi;
+    }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "NO");
+        compile_run_assert_output_eq(code, "NO\nYES");
     }
 
     #[test]
@@ -201,41 +202,75 @@ class Main {
         let code = r#"
 class Main {
     io: IO <- new IO; 
-    main() : Object {
-      if 42 = 42 then io.out_string("YES") else io.out_string("NO") fi
-    };  
+    main() : Object {{
+      if 42 = 42 then io.out_string("YES") else io.out_string("NO") fi;
+      if 42 = 43 then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
 };
 "#;
 
-        compile_run_assert_output_eq(code, "YES");
+        compile_run_assert_output_eq(code, "YES\nNO");
     }
 
     #[test]
-    fn test_codegen_function_string_equality() {
+    fn test_codegen_string_equality() {
         let code = r#"
         class Main {
     io: IO <- new IO; 
-    main() : Object {
-          if "hello" = "bye" then io.out_string("YES") else io.out_string("NO") fi
-    };  
+    main() : Object {{
+          if "hello" = "hello" then io.out_string("YES") else io.out_string("NO") fi;
+          if "hello" = "bye" then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "NO");
+        compile_run_assert_output_eq(code, "YES\nNO");
     }
 
     #[test]
-    fn test_codegen_function_pointer_equality() {
+    fn test_codegen_pointer_equality() {
         let code = r#"
 class Main {
     io: IO <- new IO; 
     io1: IO <- new IO; 
     io2: IO <- new IO; 
-    main() : Object {
-          if io2 = io2 then io.out_string("YES") else io.out_string("NO") fi
-    };  
+    main() : Object {{
+          if io1 = io2 then io.out_string("YES") else io.out_string("NO") fi;
+          if io2 = io2 then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
 };
 "#;
 
-        compile_run_assert_output_eq(code, "YES");
+        compile_run_assert_output_eq(code, "NO\nYES");
+    }
+
+    #[test]
+    fn test_codegen_int_lt() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    main() : Object {{
+          if 42 < 42 then io.out_string("YES") else io.out_string("NO") fi;
+          if 42 < 41 then io.out_string("YES") else io.out_string("NO") fi;
+          if 41 < 42 then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
+};
+"#;
+
+        compile_run_assert_output_eq(code, "NO\nNO\nYES");
+    }
+
+    #[test]
+    fn test_codegen_int_lte() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    main() : Object {{
+          if 42 <= 42 then io.out_string("YES") else io.out_string("NO") fi;
+          if 42 <= 41 then io.out_string("YES") else io.out_string("NO") fi;
+          if 41 <= 42 then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "YES\nNO\nYES");
     }
 }
