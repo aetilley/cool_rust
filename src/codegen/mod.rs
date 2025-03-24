@@ -13,6 +13,7 @@ use crate::symbol::Sym;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
+use inkwell::types::{IntType, PointerType};
 use inkwell::values::PointerValue;
 use inkwell::AddressSpace;
 
@@ -25,6 +26,9 @@ pub struct CodeGenManager<'ctx> {
     pub ct: ClassTable,
     pub current_class: Option<Sym>,
     pub current_fn: Option<Sym>,
+    pub int32ty: IntType<'ctx>,
+    pub boolty: IntType<'ctx>,
+    pub ptrty: PointerType<'ctx>,
 }
 
 impl<'ctx> CodeGenManager<'ctx> {
@@ -47,6 +51,9 @@ impl<'ctx> CodeGenManager<'ctx> {
         );
         let current_class = None;
         let current_fn = None;
+        let int32ty = context.i32_type();
+        let boolty = context.bool_type();
+        let ptrty = context.ptr_type(aspace);
 
         let mut man = CodeGenManager {
             context,
@@ -57,6 +64,9 @@ impl<'ctx> CodeGenManager<'ctx> {
             ct,
             current_class,
             current_fn,
+            int32ty,
+            boolty,
+            ptrty,
         };
 
         man.code_all_class_structs();
@@ -307,7 +317,7 @@ class Main {
     }
 
     #[test]
-    fn test_codegen_int_lt() {
+    fn test_codegen_lt() {
         let code = r#"
 class Main {
     io: IO <- new IO; 
@@ -323,7 +333,7 @@ class Main {
     }
 
     #[test]
-    fn test_codegen_int_lte() {
+    fn test_codegen_lte() {
         let code = r#"
 class Main {
     io: IO <- new IO; 
@@ -335,5 +345,72 @@ class Main {
 };
 "#;
         compile_run_assert_output_eq(code, "YES\nNO\nYES");
+    }
+
+    #[test]
+    fn test_codegen_integer_comp() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    main() : Object {{
+          if ~42 + 1 = 0-42 then io.out_string("YES") else io.out_string("NO") fi;
+          if ~0 + 1 = 0 then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "YES\nYES");
+    }
+
+    #[test]
+    fn test_codegen_logical_not() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    main() : Object {{
+          if not true then io.out_string("YES") else io.out_string("NO") fi;
+          if not false then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "NO\nYES");
+    }
+
+    #[test]
+    fn test_codegen_isvoid() {
+        let code = r#"
+class Orange{};
+
+class Main {
+    io: IO <- new IO; 
+    a: String;
+    b: String <- "hello";
+    c: Orange;
+    main() : Object {{
+          if isvoid(a) then io.out_string("YES") else io.out_string("NO") fi;
+          if isvoid(b) then io.out_string("YES") else io.out_string("NO") fi;
+          if isvoid(c) then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "NO\nNO\nYES");
+    }
+
+    #[test]
+    fn test_codegen_arith() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    main() : Object {{
+          if  2 + 3 = 5 then io.out_string("YES") else io.out_string("NO") fi;
+          if  3 - 1 = 2 then io.out_string("YES") else io.out_string("NO") fi;
+          if  2 - 3 = 0 - 1 then io.out_string("YES") else io.out_string("NO") fi;
+          if  2 * 3 = 6 then io.out_string("YES") else io.out_string("NO") fi;
+          if  6 / 2 = 3 then io.out_string("YES") else io.out_string("NO") fi;
+          if  6 / (0 - 2) = (0 - 3) then io.out_string("YES") else io.out_string("NO") fi;
+          if  6 / 4 = 1 then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "YES\nYES\nYES\nYES\nYES\nYES\n");
     }
 }

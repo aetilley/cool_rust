@@ -14,6 +14,23 @@ impl<'ctx> CodeGenManager<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
+            ExprData::Not { expr } => {
+                let struct_ptr = self.codegen(expr);
+                let val = self.load_int_field_from_pointer_at_struct(
+                    struct_ptr,
+                    BOOL,
+                    self.context.bool_type(),
+                    BOOL_VAL_IND,
+                );
+                let one = self.context.bool_type().const_int(1, false);
+                let negation = self.builder.build_xor(val, one, "negation").unwrap();
+                self.code_new_int(negation)
+            }
+            ExprData::IsVoid { expr } => {
+                let val = self.codegen(expr);
+                let is_null = self.builder.build_is_null(val, "isnull").unwrap();
+                self.get_bool_for_value(is_null)
+            }
             ExprData::Assign { id, expr } => {
                 let new_val_ptr = self.codegen(expr);
 
@@ -49,6 +66,45 @@ impl<'ctx> CodeGenManager<'ctx> {
                 }
 
                 panic!("No identifier {} in scope.", id);
+            }
+            ExprData::Plus { lhs, rhs }
+            | ExprData::Minus { lhs, rhs }
+            | ExprData::Times { lhs, rhs }
+            | ExprData::Divide { lhs, rhs } => {
+                let lhs_ptr = self.codegen(lhs);
+                let rhs_ptr = self.codegen(rhs);
+                let l_int_value = self.load_int_field_from_pointer_at_struct(
+                    lhs_ptr,
+                    INT,
+                    self.context.i32_type(),
+                    INT_VAL_IND,
+                );
+                let r_int_value = self.load_int_field_from_pointer_at_struct(
+                    rhs_ptr,
+                    INT,
+                    self.context.i32_type(),
+                    INT_VAL_IND,
+                );
+                let value = match data {
+                    ExprData::Plus { lhs: _, rhs: _ } => {
+                        self.builder.build_int_add(l_int_value, r_int_value, "sum")
+                    }
+                    ExprData::Minus { lhs: _, rhs: _ } => {
+                        self.builder
+                            .build_int_sub(l_int_value, r_int_value, "difference")
+                    }
+                    ExprData::Times { lhs: _, rhs: _ } => {
+                        self.builder
+                            .build_int_mul(l_int_value, r_int_value, "product")
+                    }
+                    ExprData::Divide { lhs: _, rhs: _ } => {
+                        self.builder
+                            .build_int_signed_div(l_int_value, r_int_value, "quotient")
+                    }
+                    _ => panic!(""),
+                };
+
+                self.code_new_int(value.unwrap())
             }
             ExprData::Lt { lhs, rhs } | ExprData::Leq { lhs, rhs } => {
                 let comp_op = match data {
@@ -378,6 +434,19 @@ impl<'ctx> CodeGenManager<'ctx> {
                     Left(BasicValueEnum::PointerValue(ptr)) => ptr,
                     _ => self.context.ptr_type(self.aspace).const_null(),
                 }
+            }
+
+            ExprData::Comp { expr } => {
+                // Integer complement (flip every bit)
+                let val = self.codegen(expr);
+                let inner = self.load_int_field_from_pointer_at_struct(
+                    val,
+                    INT,
+                    self.context.i32_type(),
+                    INT_VAL_IND,
+                );
+                let inverted = self.builder.build_not(inner, "inverted").unwrap();
+                self.code_new_int(inverted)
             }
 
             ExprData::StaticDispatch {

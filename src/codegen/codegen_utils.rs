@@ -94,7 +94,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         new_ptr
     }
 
-    fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
+    pub fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
         let new_ptr = self.code_new_and_init(&sym("Int"));
 
         let field = self
