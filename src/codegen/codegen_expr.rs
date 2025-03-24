@@ -13,24 +13,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     pub fn codegen(&self, expr: &Expr) -> PointerValue<'ctx> {
         let data = &*expr.data;
         match data {
-            ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
-            ExprData::Not { expr } => {
-                let struct_ptr = self.codegen(expr);
-                let val = self.load_int_field_from_pointer_at_struct(
-                    struct_ptr,
-                    BOOL,
-                    self.context.bool_type(),
-                    BOOL_VAL_IND,
-                );
-                let one = self.context.bool_type().const_int(1, false);
-                let negation = self.builder.build_xor(val, one, "negation").unwrap();
-                self.code_new_int(negation)
-            }
-            ExprData::IsVoid { expr } => {
-                let val = self.codegen(expr);
-                let is_null = self.builder.build_is_null(val, "isnull").unwrap();
-                self.get_bool_for_value(is_null)
-            }
+            ExprData::New { typ } => self.code_new_and_init(typ),
             ExprData::Assign { id, expr } => {
                 let new_val_ptr = self.codegen(expr);
 
@@ -67,6 +50,84 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 panic!("No identifier {} in scope.", id);
             }
+            ExprData::Object { id } => {
+                // First check stack then in any class attributes
+                if let Some(alloc_ptr) = self.variables.lookup(id) {
+                    let ptr = self
+                        .builder
+                        .build_load(self.context.ptr_type(self.aspace), alloc_ptr, "arg_ptr")
+                        .unwrap()
+                        .into_pointer_value();
+                    return ptr;
+                };
+                // Otherwise check attrs
+
+                let cls = self.current_class.clone().unwrap();
+                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_all_attrs(&cls);
+                if let Some(offset) = attrs.iter().position(|(name, _, _)| name == id) {
+                    let field_offset: u32 =
+                        <usize as TryInto<u32>>::try_into(offset).unwrap() + OBJECT_PREFIX_SIZE;
+                    let self_ptr_alloc = self.variables.lookup(&sym(SELF)).unwrap();
+                    let self_ptr = self
+                        .builder
+                        .build_load(
+                            self.context.ptr_type(self.aspace),
+                            self_ptr_alloc,
+                            "self_ptr",
+                        )
+                        .unwrap()
+                        .into_pointer_value();
+                    return self.load_pointer_field_from_pointer_at_struct(
+                        self_ptr,
+                        &cls,
+                        field_offset,
+                    );
+                }
+                panic!("No identifier {} in scope.", id);
+            }
+            ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
+            ExprData::StrConst { val } => {
+                let global_name = global_string_ref(val);
+                // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
+                self.module
+                    .get_global(&global_name)
+                    .unwrap_or_else(|| panic!("No static string found for '{}'", val))
+                    .as_pointer_value()
+            }
+
+            ExprData::IntConst { val } => {
+                let global_name = global_int_ref(val);
+                // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
+                self.module
+                    .get_global(&global_name)
+                    .unwrap_or_else(|| panic!("No static int found for '{}'", val))
+                    .as_pointer_value()
+            }
+            ExprData::BoolConst { val } => {
+                let global_name = global_bool_ref(*val);
+                self.module
+                    .get_global(&global_name)
+                    .unwrap_or_else(|| panic!("No static bool found for '{}'", val))
+                    .as_pointer_value()
+            }
+            ExprData::Not { expr } => {
+                let struct_ptr = self.codegen(expr);
+                let val = self.load_int_field_from_pointer_at_struct(
+                    struct_ptr,
+                    BOOL,
+                    self.context.bool_type(),
+                    BOOL_VAL_IND,
+                );
+                let one = self.context.bool_type().const_int(1, false);
+                let negation = self.builder.build_xor(val, one, "negation").unwrap();
+                self.code_new_int(negation)
+            }
+            ExprData::IsVoid { expr } => {
+                let val = self.codegen(expr);
+                let is_null = self.builder.build_is_null(val, "isnull").unwrap();
+                self.get_bool_for_value(is_null)
+            }
+
             ExprData::Plus { lhs, rhs }
             | ExprData::Minus { lhs, rhs }
             | ExprData::Times { lhs, rhs }
@@ -240,71 +301,12 @@ impl<'ctx> CodeGenManager<'ctx> {
                     self.get_bool_for_value(are_equal)
                 }
             }
-            ExprData::Object { id } => {
-                // First check stack then in any class attributes
-                if let Some(alloc_ptr) = self.variables.lookup(id) {
-                    let ptr = self
-                        .builder
-                        .build_load(self.context.ptr_type(self.aspace), alloc_ptr, "arg_ptr")
-                        .unwrap()
-                        .into_pointer_value();
-                    return ptr;
-                };
-                // Otherwise check attrs
-
-                let cls = self.current_class.clone().unwrap();
-                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_all_attrs(&cls);
-                if let Some(offset) = attrs.iter().position(|(name, _, _)| name == id) {
-                    let field_offset: u32 =
-                        <usize as TryInto<u32>>::try_into(offset).unwrap() + OBJECT_PREFIX_SIZE;
-                    let self_ptr_alloc = self.variables.lookup(&sym(SELF)).unwrap();
-                    let self_ptr = self
-                        .builder
-                        .build_load(
-                            self.context.ptr_type(self.aspace),
-                            self_ptr_alloc,
-                            "self_ptr",
-                        )
-                        .unwrap()
-                        .into_pointer_value();
-                    return self.load_pointer_field_from_pointer_at_struct(
-                        self_ptr,
-                        &cls,
-                        field_offset,
-                    );
-                }
-                panic!("No identifier {} in scope.", id);
-            }
-            ExprData::StrConst { val } => {
-                let global_name = global_string_ref(val);
-                // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
-                self.module
-                    .get_global(&global_name)
-                    .unwrap_or_else(|| panic!("No static string found for '{}'", val))
-                    .as_pointer_value()
-            }
             ExprData::Block { exprs } => {
                 let mut result: PointerValue = self.context.ptr_type(self.aspace).const_null();
                 for expr in exprs.iter() {
                     result = self.codegen(expr);
                 }
                 result
-            }
-
-            ExprData::IntConst { val } => {
-                let global_name = global_int_ref(val);
-                // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
-                self.module
-                    .get_global(&global_name)
-                    .unwrap_or_else(|| panic!("No static int found for '{}'", val))
-                    .as_pointer_value()
-            }
-            ExprData::BoolConst { val } => {
-                let global_name = global_bool_ref(*val);
-                self.module
-                    .get_global(&global_name)
-                    .unwrap_or_else(|| panic!("No static bool found for '{}'", val))
-                    .as_pointer_value()
             }
             ExprData::Cond {
                 pred,
@@ -331,7 +333,38 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let phi_ptr = self.cond_builder(pred, then_fn, else_fn);
                 phi_ptr
             }
-            ExprData::New { typ } => self.code_new_and_init(typ),
+            ExprData::Loop { pred, body } => {
+                let parent = self
+                    .module
+                    .get_function(self.current_fn.as_ref().unwrap())
+                    .unwrap();
+
+                let pred_block = self.context.append_basic_block(parent, "pred");
+                let body_block = self.context.append_basic_block(parent, "body");
+                let exit_block = self.context.append_basic_block(parent, "exit");
+
+                self.builder.build_unconditional_branch(pred_block).unwrap();
+
+                self.builder.position_at_end(pred_block);
+                let pred_struct_ptr = self.codegen(pred);
+                let pred_val = self.load_int_field_from_pointer_at_struct(
+                    pred_struct_ptr,
+                    BOOL,
+                    self.boolty,
+                    BOOL_VAL_IND,
+                );
+
+                self.builder
+                    .build_conditional_branch(pred_val, body_block, exit_block)
+                    .unwrap();
+
+                self.builder.position_at_end(body_block);
+                let _ = self.codegen(body);
+                self.builder.build_unconditional_branch(pred_block).unwrap();
+
+                self.builder.position_at_end(exit_block);
+                self.ptrty.const_null()
+            }
 
             ExprData::Dispatch {
                 slf,

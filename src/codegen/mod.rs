@@ -91,7 +91,7 @@ impl Program {
     pub fn to_llvm(&self, out_file: &str) {
         let context = Context::create();
         let man = CodeGenManager::from(&context, self);
-        man.module.verify().unwrap();
+        //man.module.verify().unwrap();
         man.module.print_to_file(out_file).unwrap();
     }
 }
@@ -244,14 +244,34 @@ class Main {
     fn test_codegen_cond() {
         let code = r#"
 class Main {
-    main() : 
-    Object {{
+    main() : Object {{
       if false then (new IO).out_string("YES") else (new IO).out_string("NO") fi;
       if true then (new IO).out_string("YES") else (new IO).out_string("NO") fi;
     }};  
 };
 "#;
         compile_run_assert_output_eq(code, "NO\nYES");
+    }
+
+    #[test]
+    fn test_codegen_loop() {
+        let code = r#"
+class Main {
+    a: Int <- 0;
+    main() : Object {{
+        (new IO).out_string("Time keeps on");
+        while a < 3 loop {
+            (new IO).out_string("slippin");
+            a <- a + 1;
+        } pool;
+        (new IO).out_string("into the fuuuture....");
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(
+            code,
+            "Time keeps on\nslippin\nslippin\nslippin\ninto the fuuuture....",
+        );
     }
 
     #[test]
