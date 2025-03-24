@@ -143,6 +143,19 @@ mod codegen_tests {
     }
 
     #[test]
+    fn test_codegen_simple_out_string() {
+        let code = r#"class Main{main():Object{(new IO).out_string("hello")};};"#;
+        compile_run_assert_output_eq(code, "hello");
+    }
+
+    //#[test]
+    // How to do this?
+    fn test_codegen_simple_in_string() {
+        todo!();
+    }
+
+
+    #[test]
     fn test_codegen_dynamic_disp() {
         let code = r#"
     class Apple {

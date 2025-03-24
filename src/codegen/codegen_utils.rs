@@ -1,7 +1,7 @@
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
-use inkwell::types::IntType;
+use inkwell::types::{ArrayType, IntType};
 use inkwell::values::{ArrayValue, IntValue};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
 
@@ -15,27 +15,56 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.context.i8_type().const_array(&array_values[..])
     }
 
-    pub fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-        let new_ptr = self.code_new_and_init(&sym("String"));
+    //pub fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
+    //    let new_ptr = self.code_new_and_init(&sym("String"));
 
+    //    let pointee_ty = self.context.get_struct_type("String").unwrap();
+    //    // set Length
+    //    let value = self
+    //        .context
+    //        .i32_type()
+    //        .const_int(str_array.get_type().len() as u64, false);
+    //    let field = self
+    //        .builder
+    //        .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
+    //        .unwrap();
+    //    self.builder.build_store(field, value).unwrap();
+
+    //    // set array
+    //    let field = self
+    //        .builder
+    //        .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
+    //        .unwrap();
+    //    self.builder.build_store(field, str_array).unwrap();
+
+    //    new_ptr
+    //}
+
+    pub fn code_new_string_from_ptr(
+        &self,
+        str_array_ptr: PointerValue,
+        array_type: ArrayType,
+        length: IntValue,
+    ) -> PointerValue<'ctx> {
         let pointee_ty = self.context.get_struct_type("String").unwrap();
+        let malloc_name = &format!("{}_malloc", pointee_ty);
+        let new_ptr = self.builder.build_malloc(pointee_ty, malloc_name).unwrap();
+
         // set Length
-        let value = self
-            .context
-            .i32_type()
-            .const_int(str_array.get_type().len() as u64, false);
+
         let field = self
             .builder
             .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
             .unwrap();
-        self.builder.build_store(field, value).unwrap();
+        self.builder.build_store(field, length).unwrap();
 
-        // set array
+        //set array
         let field = self
             .builder
             .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
             .unwrap();
-        self.builder.build_store(field, str_array).unwrap();
+        let value = self.builder.build_load(array_type, str_array_ptr, "array").unwrap().into_array_value();
+        self.builder.build_store(field, value).unwrap();
 
         new_ptr
     }
@@ -56,23 +85,6 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     //     new_ptr
     // }
-
-    pub fn malloc_new_bool_with_value(&self, value: IntValue) -> PointerValue<'ctx> {
-        let new_ptr = self.code_new_and_init(&sym("Bool"));
-
-        let field = self
-            .builder
-            .build_struct_gep(
-                self.context.get_struct_type("Bool").unwrap(),
-                new_ptr,
-                BOOL_VAL_IND,
-                "gep",
-            )
-            .unwrap();
-        self.builder.build_store(field, value).unwrap();
-
-        new_ptr
-    }
 
     pub fn code_new_and_init(&self, typ: &Sym) -> PointerValue<'ctx> {
         let struct_type = self

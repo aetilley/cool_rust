@@ -21,6 +21,15 @@ pub const BOOL_VAL_IND: u32 = 1;
 pub const STRING_LEN_IND: u32 = 1;
 pub const STRING_CONTENT_IND: u32 = 2;
 
+// Should maybe use %c to read whitespace.
+pub const STRING_FORMATTER: &str = "%s\0";
+pub const INT_FORMATTER: &str = "%d\0";
+pub const MAX_IN_STRING_LEN: u64 = 2000;
+
+
+pub const OUT_STRING: &str = "out_string";
+pub const IN_STRING: &str = "in_string";
+
 pub fn method_ref(cls_name: &Sym, method_name: &Sym) -> String {
     format!("{}.{}", cls_name, method_name)
 }

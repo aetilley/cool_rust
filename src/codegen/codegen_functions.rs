@@ -1,8 +1,9 @@
 use crate::ast::{Expr, ExprData, Formal};
 use crate::symbol::{sym, Sym};
+use inkwell::basic_block::BasicBlock;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, FunctionType};
-use inkwell::values::{BasicMetadataValueEnum, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
 
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
@@ -209,13 +210,43 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // Method bodies
 
-    fn code_io_out_string(&self) {
-        // IO.out_string
-        let fn_name = "IO.out_string";
-        let fn_val = self.module.get_function(fn_name).unwrap();
+    fn declare_puts(&self) {
+        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
+        let puts_type = self.context.i32_type().fn_type(&[input_type], false);
+        self.module
+            .add_function("puts", puts_type, Some(Linkage::External));
+    }
+
+    fn declare_strcmp(&self) {
+        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
+        let puts_type = self
+            .context
+            .i32_type()
+            .fn_type(&[input_type, input_type], false);
+        self.module
+            .add_function("strcmp", puts_type, Some(Linkage::External));
+    }
+
+    fn declare_gets(&self) {
+        //let array_type = self.context.i8_type().array_type(2);
+        let typ = self.context.ptr_type(self.aspace);
+        let fn_type = typ.fn_type(&[typ.into()], false);
+        self.module
+            .add_function("gets", fn_type, Some(Linkage::External));
+    }
+
+    fn code_function_entry(&self, fn_name: &str) -> (FunctionValue, BasicBlock) {
+        // For predefined functions only!
+        let fn_val = self.module.get_function(&fn_name).unwrap();
         let block_name = &format!("{}_entry", fn_name);
         let entry = self.context.append_basic_block(fn_val, block_name);
         self.builder.position_at_end(entry);
+        return (fn_val, entry);
+    }
+
+    fn code_io_out_string(&self) {
+        let fn_name = method_ref(&sym(IO), &sym(OUT_STRING));
+        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
         let arg = fn_val.get_last_param().unwrap().into_pointer_value();
         let pointee_ty = self.context.get_struct_type("String").unwrap();
@@ -236,21 +267,37 @@ impl<'ctx> CodeGenManager<'ctx> {
         fn_val.verify(false);
     }
 
-    fn declare_puts(&self) {
-        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let puts_type = self.context.i32_type().fn_type(&[input_type], false);
-        self.module
-            .add_function("puts", puts_type, Some(Linkage::External));
-    }
+    fn code_io_in_string(&self) {
+        let fn_name = method_ref(&sym(IO), &sym(IN_STRING));
+        let (_fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
-    fn declare_strcmp(&self) {
-        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let puts_type = self
+        let buff_size = self.context.i32_type().const_int(MAX_IN_STRING_LEN, false);
+        let array_type = self
             .context
-            .i32_type()
-            .fn_type(&[input_type, input_type], false);
-        self.module
-            .add_function("strcmp", puts_type, Some(Linkage::External));
+            .i8_type()
+            .array_type(MAX_IN_STRING_LEN.try_into().unwrap());
+        let dest_ptr = self
+            .builder
+            .build_array_malloc(self.context.i8_type(), buff_size, "buffer_ptr")
+            .unwrap();
+        // check this?
+        let _ = self
+            .builder
+            .build_call(
+                self.module.get_function("gets").unwrap(),
+                &[dest_ptr.into()],
+                "_",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap();
+
+        let result = self.code_new_string_from_ptr(dest_ptr, array_type, buff_size);
+
+        // let null = self.context.ptr_type(self.aspace).const_null();
+        // self.builder.build_return(Some(&null)).unwrap();
+        self.builder.build_return(Some(&result)).unwrap();
     }
 
     fn code_method_body(
@@ -294,10 +341,12 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     fn code_native_method_bodies(&mut self) {
         self.declare_puts();
+        self.declare_gets();
         self.declare_strcmp();
         self.code_io_out_string();
-        // TEMPORARY!  Just so we can run our program.
-        let skip_list = vec![sym("out_string")];
+        self.code_io_in_string();
+        // TEMPORARY!  Just so we can run our program before all natives are really implemented.
+        let skip_list = vec![sym("out_string"), sym("in_string")];
         self.code_native_method_stubs(skip_list);
     }
 
