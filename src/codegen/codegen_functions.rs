@@ -306,9 +306,17 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap();
 
         // Warning message
-        let warning_array = self.code_array_value_from_sym(&sym(&format!("Please enter no more than {} characters.", MAX_IN_STRING_LEN))); 
-        let warning_ptr = self.builder.build_alloca(warning_array.get_type(), "ptr to warning").unwrap();
-        self.builder.build_store(warning_ptr, warning_array).unwrap();
+        let warning_array = self.code_array_value_from_sym(&sym(&format!(
+            "Please enter no more than {} characters.",
+            MAX_IN_STRING_LEN
+        )));
+        let warning_ptr = self
+            .builder
+            .build_alloca(warning_array.get_type(), "ptr to warning")
+            .unwrap();
+        self.builder
+            .build_store(warning_ptr, warning_array)
+            .unwrap();
         let puts_fn = self.module.get_function("puts").unwrap();
         self.builder
             .build_call(puts_fn, &[warning_ptr.into()], "call_puts")

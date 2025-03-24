@@ -29,7 +29,7 @@ pub const STRING_CONTENT_IND: u32 = 2;
 // Should maybe use %c to read whitespace.
 pub const STRING_FORMATTER: &str = "%s\0";
 pub const INT_FORMATTER: &str = "%d\0";
-pub const MAX_IN_STRING_LEN: u64 = 10000;
+pub const MAX_IN_STRING_LEN: u64 = 100;
 
 pub const OUT_STRING: &str = "out_string";
 pub const IN_STRING: &str = "in_string";
