@@ -276,15 +276,14 @@ impl<'ctx> CodeGenManager<'ctx> {
         let arg = fn_val.get_last_param().unwrap().into_pointer_value();
         let pointee_ty = self.context.get_struct_type("String").unwrap();
         // Get String array from second field of *String
-        let to_print_pointer = self
+        let to_print_field = self
             .builder
             .build_struct_gep(pointee_ty, arg, STRING_CONTENT_IND, "gep")
             .unwrap();
 
-        let to_print_0 = BasicMetadataValueEnum::PointerValue(to_print_pointer);
         let puts_fn = self.module.get_function("puts").unwrap();
         self.builder
-            .build_call(puts_fn, &[to_print_0], "call_puts")
+            .build_call(puts_fn, &[to_print_field.into()], "call_puts")
             .unwrap();
 
         let body_val = self.codegen(&Expr::new(&sym("Object")));
@@ -306,6 +305,16 @@ impl<'ctx> CodeGenManager<'ctx> {
             .build_array_malloc(self.context.i8_type(), buff_size, "buffer_ptr")
             .unwrap();
 
+        // Warning message
+        let warning_array = self.code_array_value_from_sym(&sym(&format!("Please enter no more than {} characters.", MAX_IN_STRING_LEN))); 
+        let warning_ptr = self.builder.build_alloca(warning_array.get_type(), "ptr to warning").unwrap();
+        self.builder.build_store(warning_ptr, warning_array).unwrap();
+        let puts_fn = self.module.get_function("puts").unwrap();
+        self.builder
+            .build_call(puts_fn, &[warning_ptr.into()], "call_puts")
+            .unwrap();
+
+        // Call gets
         let _ = self
             .builder
             .build_call(
