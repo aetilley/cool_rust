@@ -14,6 +14,12 @@ impl<'ctx> CodeGenManager<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
+            ExprData::Assign { id, expr } => {
+                let new_val_ptr = self.codegen(expr);
+                let ptr_to_ptr = self.variables.lookup(id).unwrap();
+                self.builder.build_store(ptr_to_ptr, new_val_ptr).unwrap();
+                new_val_ptr
+            }
             ExprData::Lt { lhs, rhs } | ExprData::Leq { lhs, rhs } => {
                 let comp_op = match data {
                     ExprData::Lt { lhs: _, rhs: _ } => IntPredicate::ULT,
