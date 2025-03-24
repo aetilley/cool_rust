@@ -16,9 +16,39 @@ impl<'ctx> CodeGenManager<'ctx> {
             ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
             ExprData::Assign { id, expr } => {
                 let new_val_ptr = self.codegen(expr);
-                let ptr_to_ptr = self.variables.lookup(id).unwrap();
-                self.builder.build_store(ptr_to_ptr, new_val_ptr).unwrap();
-                new_val_ptr
+
+                // First check variables
+                if let Some(ptr_to_ptr) = self.variables.lookup(id) {
+                    self.builder.build_store(ptr_to_ptr, new_val_ptr).unwrap();
+                    return new_val_ptr;
+                }
+
+                // else check attributes
+                let cls = self.current_class.clone().unwrap();
+                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_all_attrs(&cls);
+                if let Some(offset) = attrs.iter().position(|(name, _, _)| name == id) {
+                    let field_offset: u32 =
+                        <usize as TryInto<u32>>::try_into(offset).unwrap() + OBJECT_PREFIX_SIZE;
+                    let self_ptr_alloc = self.variables.lookup(&sym(SELF)).unwrap();
+                    let self_ptr = self
+                        .builder
+                        .build_load(
+                            self.context.ptr_type(self.aspace),
+                            self_ptr_alloc,
+                            "self_ptr",
+                        )
+                        .unwrap()
+                        .into_pointer_value();
+                    self.store_pointer_value_into_pointer_at_struct(
+                        self_ptr,
+                        &cls,
+                        field_offset,
+                        new_val_ptr,
+                    );
+                    return new_val_ptr;
+                }
+
+                panic!("No identifier {} in scope.", id);
             }
             ExprData::Lt { lhs, rhs } | ExprData::Leq { lhs, rhs } => {
                 let comp_op = match data {
@@ -30,22 +60,18 @@ impl<'ctx> CodeGenManager<'ctx> {
                 };
                 let lhs_ptr = self.codegen(lhs);
                 let rhs_ptr = self.codegen(rhs);
-                let l_int_value = self
-                    .load_int_field_from_pointer_at_struct(
-                        lhs_ptr,
-                        INT,
-                        self.context.i32_type(),
-                        INT_VAL_IND,
-                    )
-                    .into_int_value();
-                let r_int_value = self
-                    .load_int_field_from_pointer_at_struct(
-                        rhs_ptr,
-                        INT,
-                        self.context.i32_type(),
-                        INT_VAL_IND,
-                    )
-                    .into_int_value();
+                let l_int_value = self.load_int_field_from_pointer_at_struct(
+                    lhs_ptr,
+                    INT,
+                    self.context.i32_type(),
+                    INT_VAL_IND,
+                );
+                let r_int_value = self.load_int_field_from_pointer_at_struct(
+                    rhs_ptr,
+                    INT,
+                    self.context.i32_type(),
+                    INT_VAL_IND,
+                );
 
                 let does_compare: IntValue = self
                     .builder
@@ -64,22 +90,18 @@ impl<'ctx> CodeGenManager<'ctx> {
                     } else {
                         BOOL_VAL_IND
                     };
-                    let l_int_value = self
-                        .load_int_field_from_pointer_at_struct(
-                            lhs_ptr,
-                            stype,
-                            self.context.i32_type(),
-                            field_ind,
-                        )
-                        .into_int_value();
-                    let r_int_value = self
-                        .load_int_field_from_pointer_at_struct(
-                            rhs_ptr,
-                            stype,
-                            self.context.i32_type(),
-                            field_ind,
-                        )
-                        .into_int_value();
+                    let l_int_value = self.load_int_field_from_pointer_at_struct(
+                        lhs_ptr,
+                        stype,
+                        self.context.i32_type(),
+                        field_ind,
+                    );
+                    let r_int_value = self.load_int_field_from_pointer_at_struct(
+                        rhs_ptr,
+                        stype,
+                        self.context.i32_type(),
+                        field_ind,
+                    );
 
                     let are_equal: IntValue = self
                         .builder
@@ -172,10 +194,10 @@ impl<'ctx> CodeGenManager<'ctx> {
                         .into_pointer_value();
                     return ptr;
                 };
+                // Otherwise check attrs
 
                 let cls = self.current_class.clone().unwrap();
                 let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_all_attrs(&cls);
-                let pointee_ty = self.context.get_struct_type(&cls).unwrap();
                 if let Some(offset) = attrs.iter().position(|(name, _, _)| name == id) {
                     let field_offset: u32 =
                         <usize as TryInto<u32>>::try_into(offset).unwrap() + OBJECT_PREFIX_SIZE;
@@ -189,24 +211,11 @@ impl<'ctx> CodeGenManager<'ctx> {
                         )
                         .unwrap()
                         .into_pointer_value();
-                    let attr_field = self
-                        .builder
-                        .build_struct_gep(
-                            pointee_ty,
-                            self_ptr,
-                            field_offset,
-                            "get attr field from objectname",
-                        )
-                        .unwrap();
-                    return self
-                        .builder
-                        .build_load(
-                            self.context.ptr_type(self.aspace),
-                            attr_field,
-                            "load attr pointer",
-                        )
-                        .unwrap()
-                        .into_pointer_value();
+                    return self.load_pointer_field_from_pointer_at_struct(
+                        self_ptr,
+                        &cls,
+                        field_offset,
+                    );
                 }
                 panic!("No identifier {} in scope.", id);
             }
@@ -247,14 +256,12 @@ impl<'ctx> CodeGenManager<'ctx> {
                 else_expr,
             } => {
                 let bool_struct_ptr = self.codegen(pred);
-                let pred_val = self
-                    .load_int_field_from_pointer_at_struct(
-                        bool_struct_ptr,
-                        BOOL,
-                        self.context.bool_type(),
-                        BOOL_VAL_IND,
-                    )
-                    .into_int_value();
+                let pred_val = self.load_int_field_from_pointer_at_struct(
+                    bool_struct_ptr,
+                    BOOL,
+                    self.context.bool_type(),
+                    BOOL_VAL_IND,
+                );
 
                 let one_const = self.context.bool_type().const_int(1, false);
 

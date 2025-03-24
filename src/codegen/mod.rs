@@ -143,6 +143,43 @@ mod codegen_tests {
     }
 
     #[test]
+    fn test_codegen_assign_attr() {
+        let code = r#"
+class Main {
+    a: String <- "hello";
+    io: IO <- (new IO);
+    main() : Object {{
+        io.out_string(a);
+        a <- "bonjour";
+        io.out_string(a);
+        a <- "hola";
+        io.out_string(a);
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "hello\nbonjour\nhola");
+    }
+
+    #[test]
+    fn test_codegen_assign_local() {
+        let code = r#"
+class Main {
+    a: String <- "hello";
+    main() : Object {{
+        (new IO).out_string(a);
+        (new IO).out_string(foo(a));
+    }};
+    
+    foo(a: String) : String {{
+        a <- "goodbye";
+        a;
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "hello\ngoodbye");
+    }
+
+    #[test]
     fn test_codegen_simple_out_string() {
         let code = r#"class Main{main():Object{(new IO).out_string("hello")};};"#;
         compile_run_assert_output_eq(code, "hello");
@@ -155,7 +192,7 @@ mod codegen_tests {
     }
 
     #[test]
-    fn test_string_length() {
+    fn test_codegen_string_length() {
         let code = r#"
 class Main {
     io: IO <- (new IO);

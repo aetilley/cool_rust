@@ -3,7 +3,7 @@ use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
 use inkwell::types::{ArrayType, IntType};
 use inkwell::values::{ArrayValue, IntValue};
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, PointerValue};
 
 impl<'ctx> CodeGenManager<'ctx> {
     pub fn code_array_value_from_sym(&self, s: &Sym) -> ArrayValue<'ctx> {
@@ -131,19 +131,60 @@ impl<'ctx> CodeGenManager<'ctx> {
         new_ptr
     }
 
-    pub fn load_int_field_from_pointer_at_struct(
+    pub fn store_pointer_value_into_pointer_at_struct(
         &self,
-        ptr: PointerValue<'ctx>,
+        ptr_at_struct: PointerValue<'ctx>,
         struct_type_name: &str,
-        int_type: IntType<'ctx>,
         field_offset: u32,
-    ) -> BasicValueEnum<'ctx> {
+        pointer_to_store: PointerValue<'ctx>,
+    ) {
         // Basically just a helper function to do a gep then a load.
         let field = self
             .builder
             .build_struct_gep(
                 self.context.get_struct_type(struct_type_name).unwrap(),
-                ptr,
+                ptr_at_struct,
+                field_offset,
+                "Field",
+            )
+            .unwrap();
+        self.builder.build_store(field, pointer_to_store).unwrap();
+    }
+
+    pub fn load_pointer_field_from_pointer_at_struct(
+        &self,
+        ptr_at_struct: PointerValue<'ctx>,
+        struct_type_name: &str,
+        field_offset: u32,
+    ) -> PointerValue<'ctx> {
+        // Basically just a helper function to do a gep then a load.
+        let field = self
+            .builder
+            .build_struct_gep(
+                self.context.get_struct_type(struct_type_name).unwrap(),
+                ptr_at_struct,
+                field_offset,
+                "Field",
+            )
+            .unwrap();
+        self.builder
+            .build_load(self.context.ptr_type(self.aspace), field, "Field value.")
+            .unwrap()
+            .into_pointer_value()
+    }
+    pub fn load_int_field_from_pointer_at_struct(
+        &self,
+        ptr_at_struct: PointerValue<'ctx>,
+        struct_type_name: &str,
+        int_type: IntType<'ctx>,
+        field_offset: u32,
+    ) -> IntValue<'ctx> {
+        // Basically just a helper function to do a gep then a load.
+        let field = self
+            .builder
+            .build_struct_gep(
+                self.context.get_struct_type(struct_type_name).unwrap(),
+                ptr_at_struct,
                 field_offset,
                 "Field",
             )
@@ -151,6 +192,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder
             .build_load(int_type, field, "Field value.")
             .unwrap()
+            .into_int_value()
     }
 
     // fn load_array_field_from_pointer_at_struct(
