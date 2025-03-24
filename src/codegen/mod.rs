@@ -154,6 +154,19 @@ mod codegen_tests {
         todo!();
     }
 
+    #[test]
+    fn test_string_length() {
+        let code = r#"
+class Main {
+    io: IO <- (new IO);
+    main() : Object {{
+          if "hello".length() = 5 then io.out_string("YES") else io.out_string("NO") fi;
+          if "hell".length() = 5 then io.out_string("YES") else io.out_string("NO") fi;
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "YES\nNO");
+    }
 
     #[test]
     fn test_codegen_dynamic_disp() {

@@ -1,11 +1,16 @@
 use crate::symbol::Sym;
 
 // TODO make these usize
+
+// Type Names
 pub const BOOL: &str = "Bool";
 pub const IO: &str = "IO";
 pub const OBJECT: &str = "Object";
 pub const INT: &str = "Int";
 pub const STRING: &str = "String";
+
+// Method Names
+pub const LENGTH: &str = "length";
 
 pub const SELF: &str = "self";
 pub const INIT: &str = "init";
@@ -25,7 +30,6 @@ pub const STRING_CONTENT_IND: u32 = 2;
 pub const STRING_FORMATTER: &str = "%s\0";
 pub const INT_FORMATTER: &str = "%d\0";
 pub const MAX_IN_STRING_LEN: u64 = 2000;
-
 
 pub const OUT_STRING: &str = "out_string";
 pub const IN_STRING: &str = "in_string";

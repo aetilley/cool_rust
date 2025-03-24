@@ -44,47 +44,72 @@ impl<'ctx> CodeGenManager<'ctx> {
         &self,
         str_array_ptr: PointerValue,
         array_type: ArrayType,
-        length: IntValue,
     ) -> PointerValue<'ctx> {
         let pointee_ty = self.context.get_struct_type("String").unwrap();
-        let malloc_name = &format!("{}_malloc", pointee_ty);
-        let new_ptr = self.builder.build_malloc(pointee_ty, malloc_name).unwrap();
+        let new_ptr = self.code_new_and_init(&sym("String"));
+
+        // Get length
+        let length = self
+            .builder
+            .build_call(
+                self.module.get_function("strlen").unwrap(),
+                &[str_array_ptr.into()],
+                "_",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+
+        let length_struct_ptr = self.code_new_int(length);
+        let length_struct = self
+            .builder
+            .build_load(
+                self.context.get_struct_type(INT).unwrap(),
+                length_struct_ptr,
+                "length_struct",
+            )
+            .unwrap();
 
         // set Length
-
         let field = self
             .builder
             .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
             .unwrap();
-        self.builder.build_store(field, length).unwrap();
+        self.builder.build_store(field, length_struct).unwrap();
 
         //set array
         let field = self
             .builder
             .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
             .unwrap();
-        let value = self.builder.build_load(array_type, str_array_ptr, "array").unwrap().into_array_value();
+        let value = self
+            .builder
+            .build_load(array_type, str_array_ptr, "array")
+            .unwrap()
+            .into_array_value();
         self.builder.build_store(field, value).unwrap();
 
         new_ptr
     }
 
-    // fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
-    //     let new_ptr = self.code_new_and_init(&sym("Int"));
+    fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
+        let new_ptr = self.code_new_and_init(&sym("Int"));
 
-    //     let field = self
-    //         .builder
-    //         .build_struct_gep(
-    //             self.context.get_struct_type("Int").unwrap(),
-    //             new_ptr,
-    //             INT_VAL_IND,
-    //             "gep",
-    //         )
-    //         .unwrap();
-    //     self.builder.build_store(field, int_val).unwrap();
+        let field = self
+            .builder
+            .build_struct_gep(
+                self.context.get_struct_type("Int").unwrap(),
+                new_ptr,
+                INT_VAL_IND,
+                "gep",
+            )
+            .unwrap();
+        self.builder.build_store(field, int_val).unwrap();
 
-    //     new_ptr
-    // }
+        new_ptr
+    }
 
     pub fn code_new_and_init(&self, typ: &Sym) -> PointerValue<'ctx> {
         let struct_type = self
