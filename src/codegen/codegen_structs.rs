@@ -47,7 +47,7 @@ impl CodeGenManager<'_> {
         // vtable, str length, str content
         let string_attrs = &[
             BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace)),
-            BasicTypeEnum::StructType(self.context.get_struct_type("Int").unwrap()),
+            BasicTypeEnum::PointerType(self.context.ptr_type(self.aspace)),
             BasicTypeEnum::ArrayType(self.context.i8_type().array_type(0)),
         ];
         let typ = self.context.get_struct_type("String").unwrap();

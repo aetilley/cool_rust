@@ -48,18 +48,22 @@ pub fn init_ref(cls: &Sym) -> String {
     format!("{}_init", cls)
 }
 
+pub const GLOBAL_ZERO: &str = "global_zero";
+
 pub fn global_bool_ref(b: bool) -> String {
     format!("bool_{}", b)
 }
 
 pub fn global_int_ref(i: &Sym) -> String {
+    let i_str = &i[..];
     let mut hasher = DefaultHasher::new();
-    i.hash(&mut hasher);
+    i_str.hash(&mut hasher);
     format!("int_{}", hasher.finish())
 }
 
 pub fn global_string_ref(s: &Sym) -> String {
+    let s_str = &s[..];
     let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
+    s_str.hash(&mut hasher);
     format!("string_{}", hasher.finish())
 }

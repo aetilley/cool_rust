@@ -103,32 +103,29 @@ impl CodeGenManager<'_> {
         int_global.set_initializer(&initializer);
     }
 
+    // Must do this after globals for ints.
     pub fn register_global_for_string(&mut self, s: &Sym) {
         // Content
         let str_content = self.code_array_value_from_sym(s);
         // Vtable
         let str_vtable_ptr = self
             .module
-            .get_global(&vtable_ref(&sym("String")))
+            .get_global(&vtable_ref(&sym(STRING)))
             .unwrap()
             .as_pointer_value();
 
         // Len as struct Int
-        let int_vtable_ptr = self
+
+        let len_str = &format!("{}", s.len());
+        let str_len_struct_ptr = self
             .module
-            .get_global(&vtable_ref(&sym("Int")))
+            .get_global(&global_int_ref(&sym(len_str)))
             .unwrap()
             .as_pointer_value();
-        let str_len = str_content.get_type().len().into();
-        let str_len_val = self.context.i32_type().const_int(str_len, false);
-        let str_len_struct = self
-            .context
-            .const_struct(&[int_vtable_ptr.into(), str_len_val.into()], false);
-
         let initializer = self.context.const_struct(
             &[
                 str_vtable_ptr.into(),
-                str_len_struct.into(),
+                str_len_struct_ptr.into(),
                 str_content.into(),
             ],
             false,
@@ -149,6 +146,8 @@ impl CodeGenManager<'_> {
         }
 
         for s in dump_strings().iter() {
+            let len_str = &format!("{}", s.len());
+            self.register_global_for_int(&sym(len_str));
             self.register_global_for_string(s);
         }
 

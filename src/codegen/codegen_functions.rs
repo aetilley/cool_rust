@@ -148,11 +148,12 @@ impl<'ctx> CodeGenManager<'ctx> {
         let pointee_ty = self.context.get_struct_type("String").unwrap();
         // set Length = 0
         let value = self.context.i32_type().const_int(0, false);
+        let value_ptr = self.code_new_int(value);
         let field = self
             .builder
             .build_struct_gep(pointee_ty, self_alloca, STRING_LEN_IND, "gep")
             .unwrap();
-        self.builder.build_store(field, value).unwrap();
+        self.builder.build_store(field, value_ptr).unwrap();
 
         // set ptr -> ""
 
@@ -251,15 +252,8 @@ impl<'ctx> CodeGenManager<'ctx> {
         let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
         let self_ptr = fn_val.get_first_param().unwrap().into_pointer_value();
 
-        let value = self
-            .builder
-            .build_struct_gep(
-                self.context.get_struct_type(STRING).unwrap(),
-                self_ptr,
-                INT_VAL_IND,
-                "int_field",
-            )
-            .unwrap();
+        let value =
+            self.load_pointer_field_from_pointer_at_struct(self_ptr, STRING, STRING_LEN_IND);
 
         self.builder.build_return(Some(&value)).unwrap();
         fn_val.verify(false);

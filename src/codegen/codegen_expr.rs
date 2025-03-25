@@ -486,7 +486,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 let method_pointer = self
                     .builder
-                    .build_extract_value(vtable_array, vtable_offset, "extract method from vtable")
+                    .build_extract_value(vtable_array, vtable_offset, "method ptr")
                     .unwrap()
                     .into_pointer_value();
 
