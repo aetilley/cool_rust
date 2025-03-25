@@ -241,6 +241,49 @@ class Main {
     }
 
     #[test]
+    fn test_codegen_let() {
+        let code = r#"
+class Main {
+        a: String <- "hello";
+    main() : Object {{
+        let a: String <- "goodbye" in (new IO).out_string(a);
+        (new IO).out_string(a);
+    }};  
+};
+"#;
+        compile_run_assert_output_eq(code, "goodbye\nhello");
+    }
+
+    #[test]
+    fn test_codegen_let_nested() {
+        let code = r#"
+class Main {
+    main() : Object {
+        let a: Int <- 2, b: Int <- 3 in (new IO).out_string(if a + b = 5 then "YES" else "NO" fi)
+    };
+};
+"#;
+        compile_run_assert_output_eq(code, "YES");
+    }
+
+    #[test]
+    fn test_codegen_let_shadow_param() {
+        let code = r#"
+class Main {
+
+    foo(a: Int) : Object {{
+        let a: Int <- 2 in (new IO).out_string(if a = 2 then "TWO" else "NOT TWO" fi);
+        (new IO).out_string(if a = 1 then "ONE" else "NOT ONE" fi);
+    }};
+    main() : Object {
+        foo(1) 
+    };
+};
+"#;
+        compile_run_assert_output_eq(code, "TWO\nONE");
+    }
+
+    #[test]
     fn test_codegen_cond() {
         let code = r#"
 class Main {
@@ -290,6 +333,35 @@ class Main {
 
         compile_run_assert_output_eq(code, "YES");
     }
+
+    #[test]
+    fn test_codegen_variable_scoping() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    x: String <- "Zero";
+
+    bar(x: String) : Object {{
+        io.out_string(x);
+    }};
+
+    foo(x : String) : Object {{
+        io.out_string(x);
+        bar("Two");
+        io.out_string(x);
+    }};
+
+    main() : Object {{
+        io.out_string(x);
+        foo("One");
+        io.out_string(x);
+    }};  
+};
+
+"#;
+        compile_run_assert_output_eq(code, "Zero\nOne\nTwo\nOne\nZero");
+    }
+
     #[test]
     fn test_codegen_int_equality() {
         let code = r#"

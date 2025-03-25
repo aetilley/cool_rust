@@ -87,9 +87,9 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // Class Initialization function bodies
     fn make_code_init_body_wrapper(
-        &self,
+        &mut self,
         name: &Sym,
-        code_body: fn(&CodeGenManager<'ctx>, &str, PointerValue),
+        code_body: fn(&mut CodeGenManager<'ctx>, &str, PointerValue),
     ) {
         // Takes care of boilerplate function setup and calls `code_body`.
         let fn_name = init_ref(name);
@@ -120,9 +120,9 @@ impl<'ctx> CodeGenManager<'ctx> {
         fn_val.verify(false);
     }
 
-    fn code_empty_init_body(&self, _name: &str, _self_alloca: PointerValue) {}
+    fn code_empty_init_body(&mut self, _name: &str, _self_alloca: PointerValue) {}
 
-    fn code_int_init_body(&self, _name: &str, self_alloca: PointerValue) {
+    fn code_int_init_body(&mut self, _name: &str, self_alloca: PointerValue) {
         let pointee_ty = self.context.get_struct_type("Int").unwrap();
         // set val = 0
         let value = self.context.i32_type().const_int(0, false);
@@ -133,7 +133,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.build_store(field, value).unwrap();
     }
 
-    fn code_bool_init_body(&self, _name: &str, self_alloca: PointerValue) {
+    fn code_bool_init_body(&mut self, _name: &str, self_alloca: PointerValue) {
         let pointee_ty = self.context.get_struct_type("Bool").unwrap();
         // set val = false
         let value = self.context.bool_type().const_int(0, false);
@@ -144,7 +144,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.build_store(field, value).unwrap();
     }
 
-    fn code_string_init_body(&self, _name: &str, self_alloca: PointerValue) {
+    fn code_string_init_body(&mut self, _name: &str, self_alloca: PointerValue) {
         let pointee_ty = self.context.get_struct_type("String").unwrap();
         // set Length = 0
         let value = self.context.i32_type().const_int(0, false);
@@ -164,7 +164,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.build_store(field, value).unwrap();
     }
 
-    fn code_native_inits(&self) {
+    fn code_native_inits(&mut self) {
         self.make_code_init_body_wrapper(&sym("Object"), CodeGenManager::code_empty_init_body);
         self.make_code_init_body_wrapper(&sym("IO"), CodeGenManager::code_empty_init_body);
         self.make_code_init_body_wrapper(&sym("Int"), CodeGenManager::code_int_init_body);
@@ -172,15 +172,10 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.make_code_init_body_wrapper(&sym("String"), CodeGenManager::code_string_init_body);
     }
 
-    fn code_init_body_for_class(&self, class_name: &str, self_alloca: PointerValue) {
-        let attrs = self
-            .ct
-            .class_attrs
-            .get(&sym(class_name))
-            .unwrap()
-            .iter()
-            .enumerate();
-        for (ind, (_, typ, init)) in attrs {
+    fn code_init_body_for_class(&mut self, class_name: &str, self_alloca: PointerValue) {
+        let attrs = self.ct.class_attrs.get(&sym(class_name)).unwrap().clone();
+
+        for (ind, (_, typ, init)) in attrs.iter().enumerate() {
             let value = if (*init.data == ExprData::NoExpr {}) {
                 let key: &str = typ;
                 if ["Int", "Bool", "String"].contains(&key) {
@@ -202,14 +197,15 @@ impl<'ctx> CodeGenManager<'ctx> {
         }
     }
 
-    fn code_init_for_class(&self, name: Sym) {
+    fn code_init_for_class(&mut self, name: Sym) {
         self.make_code_init_body_wrapper(&name, CodeGenManager::code_init_body_for_class);
     }
 
-    pub fn code_all_inits(&self) {
+    pub fn code_all_inits(&mut self) {
         self.code_native_inits();
 
-        for class in self.ct.program_classes.iter() {
+        let classes = self.ct.program_classes.clone();
+        for class in classes.iter() {
             self.code_init_for_class(class.to_owned());
         }
     }
@@ -269,7 +265,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         fn_val.verify(false);
     }
 
-    fn code_io_out_string(&self) {
+    fn code_io_out_string(&mut self) {
         let fn_name = method_ref(&sym(IO), &sym(OUT_STRING));
         let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
 

@@ -10,7 +10,7 @@ use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 
 impl<'ctx> CodeGenManager<'ctx> {
-    pub fn codegen(&self, expr: &Expr) -> PointerValue<'ctx> {
+    pub fn codegen(&mut self, expr: &Expr) -> PointerValue<'ctx> {
         let data = &*expr.data;
         match data {
             ExprData::New { typ } => self.code_new_and_init(typ),
@@ -70,11 +70,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let self_ptr_alloc = self.variables.lookup(&sym(SELF)).unwrap();
                     let self_ptr = self
                         .builder
-                        .build_load(
-                            self.context.ptr_type(self.aspace),
-                            self_ptr_alloc,
-                            "self_ptr",
-                        )
+                        .build_load(self.ptrty, self_ptr_alloc, "self_ptr")
                         .unwrap()
                         .into_pointer_value();
                     return self.load_pointer_field_from_pointer_at_struct(
@@ -85,7 +81,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 }
                 panic!("No identifier {} in scope.", id);
             }
-            ExprData::NoExpr {} => self.context.ptr_type(self.aspace).const_null(),
+            ExprData::NoExpr {} => self.ptrty.const_null(),
             ExprData::StrConst { val } => {
                 let global_name = global_string_ref(val);
                 // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
@@ -320,6 +316,8 @@ impl<'ctx> CodeGenManager<'ctx> {
                     self.context.bool_type(),
                     BOOL_VAL_IND,
                 );
+                // Note that we can't call the cond_builder utility because the two closure argument would have to be
+                // FnMut (and we can't have two of those closing around self at the same time).
 
                 let one_const = self.context.bool_type().const_int(1, false);
 
@@ -328,10 +326,68 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .build_int_compare::<IntValue>(IntPredicate::EQ, pred_val, one_const, "ifcond")
                     .unwrap();
 
-                let then_fn = || self.codegen(then_expr);
-                let else_fn = || self.codegen(else_expr);
-                let phi_ptr = self.cond_builder(pred, then_fn, else_fn);
-                phi_ptr
+                let parent = self
+                    .module
+                    .get_function(self.current_fn.as_ref().unwrap())
+                    .unwrap();
+
+                let then_bb = self.context.append_basic_block(parent, "then");
+                let else_bb = self.context.append_basic_block(parent, "else");
+                let cont_bb = self.context.append_basic_block(parent, "ifcont");
+
+                self.builder
+                    .build_conditional_branch(pred, then_bb, else_bb)
+                    .unwrap();
+
+                // build then block
+                self.builder.position_at_end(then_bb);
+                let then_val = self.codegen(then_expr);
+
+                self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+                let then_bb = self.builder.get_insert_block().unwrap();
+
+                // build else block
+                self.builder.position_at_end(else_bb);
+                let else_val = self.codegen(else_expr);
+
+                self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+                let else_bb = self.builder.get_insert_block().unwrap();
+
+                // emit merge block
+                self.builder.position_at_end(cont_bb);
+
+                let phi = self
+                    .builder
+                    .build_phi(self.context.ptr_type(self.aspace), "iftmp")
+                    .unwrap();
+
+                phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
+
+                let phi_basic = phi.as_basic_value();
+
+                phi_basic.into_pointer_value()
+            }
+            ExprData::TypCase { expr, cases: _ } => {
+                let _val_struct_ptr = self.codegen(expr);
+
+                todo!();
+            }
+            ExprData::Let {
+                id,
+                typ: _,
+                init,
+                body,
+            } => {
+                let val = self.codegen(init);
+                self.variables.enter_scope();
+                let val_alloc = self.builder.build_alloca(self.ptrty, "let alloca").unwrap();
+                self.builder.build_store(val_alloc, val).unwrap();
+                self.variables.add_binding(id, &val_alloc);
+                let result = self.codegen(body);
+                self.variables.exit_scope();
+                result
             }
             ExprData::Loop { pred, body } => {
                 let parent = self
@@ -512,8 +568,6 @@ impl<'ctx> CodeGenManager<'ctx> {
                     _ => self.context.ptr_type(self.aspace).const_null(),
                 }
             }
-
-            _ => panic!("codegen not yet supported for ExprData variant {:?}", data),
         }
     }
 }
