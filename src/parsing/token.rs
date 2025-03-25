@@ -1,6 +1,6 @@
 // ### Lexing library. ###
 
-use crate::ast::token_utils::strip_long_comments_and_get_insertion_map;
+use crate::parsing::token_utils::strip_long_comments_and_get_insertion_map;
 use logos::{Lexer, Logos, SpannedIter};
 use std::collections::HashSet;
 use std::fmt;

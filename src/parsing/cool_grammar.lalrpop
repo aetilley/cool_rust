@@ -1,6 +1,6 @@
 // build.rs uses this language specification to generate the parser ('cool_grammar.rs').
 
-use crate::ast::token::{Token, LexicalError, StringLiteralError};
+use crate::parsing::token::{Token, LexicalError, StringLiteralError};
 use crate::ast::{add_one, Program, Classes, Class, Features, Feature, Expr, Exprs, Formals, Formal, Case, Cases, LetBinding, LetBindings};
 
 grammar;

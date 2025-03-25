@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use crate::ast::cool_grammar::{ClassTyParser, ExprTyParser, FeatureTyParser, ProgramTyParser};
-use crate::ast::token::{CoolLexer, LexicalError, Token};
-use crate::ast::token_utils::{
+use crate::ast::{Case, Class, Expr, ExprData, Feature, Program};
+use crate::parsing::cool_grammar::{ClassTyParser, ExprTyParser, FeatureTyParser, ProgramTyParser};
+use crate::parsing::token::{CoolLexer, LexicalError, Token};
+use crate::parsing::token_utils::{
     adjust_locations_in_parse_error, get_updated_span, strip_long_comments_and_get_insertion_map,
 };
-use crate::ast::{Case, Class, Expr, ExprData, Feature, Program};
 
 use lalrpop_util::ParseError;
 

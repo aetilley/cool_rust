@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::ast::token::{LexicalError, Token};
+use crate::parsing::token::{LexicalError, Token};
 
 use lalrpop_util::ParseError;
 

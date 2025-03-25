@@ -490,7 +490,7 @@ impl Analyze for Expr {
 mod semant_tests {
 
     use super::*;
-    use crate::ast::parse::Parse;
+    use crate::parsing::parse::Parse;
 
     #[test]
     fn test_semant_simple_program() {

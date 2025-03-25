@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::semant::SemanticAnalysisError;
 use crate::ast::{Class, Classes, Expr, Feature, Formal, Formals};
+use crate::semant::SemanticAnalysisError;
 
 use crate::symbol::{sym, Sym};
 
@@ -451,7 +451,6 @@ impl ClassTable {
 mod class_table_tests {
 
     use super::*;
-    use crate::ast::parse::Parse;
     use crate::ast::Program;
     use common_macros::hash_map;
 
@@ -502,7 +501,7 @@ mod class_table_tests {
         };
         ";
 
-        let program = Program::parse(code).unwrap();
+        let program = Program::parse_from(code).unwrap();
 
         let result = ClassTable::new(&program.classes).unwrap();
 
@@ -665,7 +664,7 @@ mod class_table_tests {
         class Grape inherits Lemon {};
         class Kiwi inherits Orange {};
         ";
-        let program = Program::parse(code).unwrap();
+        let program = Program::parse_from(code).unwrap();
         let result = ClassTable::new(&program.classes);
         assert!(result.is_err());
     }
@@ -675,7 +674,7 @@ mod class_table_tests {
         let code: &str = r"
         class Apple inherits Int {};
         ";
-        let program = Program::parse(code).unwrap();
+        let program = Program::parse_from(code).unwrap();
         let result = ClassTable::new(&program.classes);
         assert!(result.is_err());
     }
@@ -689,7 +688,7 @@ mod class_table_tests {
         class Grape inherits Lemon {};
         class Kiwi inherits Orange {};
         ";
-        let program = Program::parse(code).unwrap();
+        let program = Program::parse_from(code).unwrap();
         let ct = ClassTable::new(&program.classes).unwrap();
         let result = ct.get_lub(&sym("Kiwi"), &sym("Grape"));
         assert_eq!(result, sym("Orange"));
@@ -717,7 +716,7 @@ class Main {
 };
         "#;
 
-        let program = Program::parse(code).unwrap();
+        let program = Program::parse_from(code).unwrap();
         let ct = ClassTable::new(&program.classes).unwrap();
         let result = ct.get_method_dynamic(&sym("Apple"), &sym("greet"));
         assert!(result.is_ok());

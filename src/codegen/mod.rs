@@ -106,8 +106,6 @@ mod codegen_tests {
 
     use super::*;
 
-    use crate::ast::parse::Parse;
-
     use assert_cmd::prelude::*;
     use predicates::prelude::*;
     use std::process::Command;
@@ -120,7 +118,7 @@ mod codegen_tests {
         let crate_root = std::env::current_dir().unwrap().display().to_string();
         let binary_path = format!("{}/test_tmp", crate_root);
 
-        let mut program = Program::parse(code).unwrap();
+        let mut program = Program::parse_from(code).unwrap();
         program.semant().unwrap();
         program.to_llvm("test_tmp.ll");
 

@@ -1,13 +1,5 @@
 #![allow(clippy::self_named_constructors)]
 
-pub mod parse;
-pub mod semant;
-pub mod token;
-pub mod token_utils;
-
-use lalrpop_util::lalrpop_mod;
-lalrpop_mod!(cool_grammar, "/ast/cool_grammar.rs");
-
 use std::fmt::Debug;
 
 use crate::symbol::{intsym, strsym, sym, Sym};
