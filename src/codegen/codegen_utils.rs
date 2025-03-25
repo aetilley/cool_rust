@@ -2,17 +2,17 @@ use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
 use inkwell::types::{ArrayType, IntType};
+use inkwell::values::PointerValue;
 use inkwell::values::{ArrayValue, IntValue};
-use inkwell::values::{BasicMetadataValueEnum, PointerValue};
 
 impl<'ctx> CodeGenManager<'ctx> {
     pub fn code_array_value_from_sym(&self, s: &Sym) -> ArrayValue<'ctx> {
         let array_values: Vec<IntValue> = s
             .as_bytes()
             .iter()
-            .map(|byt| self.context.i8_type().const_int(*byt as u64, false))
+            .map(|byt| self.i8_ty.const_int(*byt as u64, false))
             .collect();
-        self.context.i8_type().const_array(&array_values[..])
+        self.i8_ty.const_array(&array_values[..])
     }
 
     //pub fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
@@ -45,7 +45,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         str_array_ptr: PointerValue,
         array_type: ArrayType,
     ) -> PointerValue<'ctx> {
-        let pointee_ty = self.context.get_struct_type("String").unwrap();
         let new_ptr = self.code_new_and_init(&sym("String"));
 
         // Get length
@@ -65,24 +64,20 @@ impl<'ctx> CodeGenManager<'ctx> {
         let length_struct_ptr = self.code_new_int(length);
         let length_struct = self
             .builder
-            .build_load(
-                self.context.get_struct_type(INT).unwrap(),
-                length_struct_ptr,
-                "length_struct",
-            )
+            .build_load(self.cl_int_ty, length_struct_ptr, "length_struct")
             .unwrap();
 
         // set Length
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
+            .build_struct_gep(self.cl_string_ty, new_ptr, STRING_LEN_IND, "gep")
             .unwrap();
         self.builder.build_store(field, length_struct).unwrap();
 
         //set array
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
+            .build_struct_gep(self.cl_string_ty, new_ptr, STRING_CONTENT_IND, "gep")
             .unwrap();
         let value = self
             .builder
@@ -99,12 +94,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         let field = self
             .builder
-            .build_struct_gep(
-                self.context.get_struct_type("Int").unwrap(),
-                new_ptr,
-                INT_VAL_IND,
-                "gep",
-            )
+            .build_struct_gep(self.cl_int_ty, new_ptr, INT_VAL_IND, "gep")
             .unwrap();
         self.builder.build_store(field, int_val).unwrap();
 
@@ -123,10 +113,9 @@ impl<'ctx> CodeGenManager<'ctx> {
             .module
             .get_function(init_name)
             .unwrap_or_else(|| panic!("No initializer found for type {}.", typ));
-        let self_arg = BasicMetadataValueEnum::PointerValue(new_ptr);
         let call_name = &format!("{}_init_call", typ);
         self.builder
-            .build_call(initializer, &[self_arg], call_name)
+            .build_call(initializer, &[new_ptr.into()], call_name)
             .unwrap();
         new_ptr
     }
@@ -168,7 +157,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             )
             .unwrap();
         self.builder
-            .build_load(self.context.ptr_type(self.aspace), field, "Field value.")
+            .build_load(self.ptr_ty, field, "Field value.")
             .unwrap()
             .into_pointer_value()
     }
@@ -273,10 +262,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         // emit merge block
         self.builder.position_at_end(cont_bb);
 
-        let phi = self
-            .builder
-            .build_phi(self.context.ptr_type(self.aspace), "iftmp")
-            .unwrap();
+        let phi = self.builder.build_phi(self.ptr_ty, "iftmp").unwrap();
 
         phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
 

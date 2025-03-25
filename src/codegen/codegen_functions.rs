@@ -3,7 +3,7 @@ use crate::symbol::{sym, Sym};
 use inkwell::basic_block::BasicBlock;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, FunctionType};
-use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
@@ -18,13 +18,12 @@ impl<'ctx> CodeGenManager<'ctx> {
         _return_type: &Sym,
     ) -> FunctionType<'ctx> {
         // Everything is a pointer.
-        let ret_type = self.context.ptr_type(self.aspace);
-        let args_types = std::iter::repeat(ret_type)
+        let args_types = std::iter::repeat(self.ptr_ty)
             .take(parameters.len())
             .map(|f| f.into())
             .collect::<Vec<BasicMetadataTypeEnum>>();
 
-        let fn_type = ret_type.fn_type(&args_types[..], false);
+        let fn_type = self.ptr_ty.fn_type(&args_types[..], false);
         fn_type
     }
 
@@ -91,6 +90,8 @@ impl<'ctx> CodeGenManager<'ctx> {
         name: &Sym,
         code_body: fn(&mut CodeGenManager<'ctx>, &str, PointerValue),
     ) {
+        let class_id = self.sym_to_class_id_int_val(name);
+
         // Takes care of boilerplate function setup and calls `code_body`.
         let fn_name = init_ref(name);
         let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
@@ -98,20 +99,13 @@ impl<'ctx> CodeGenManager<'ctx> {
         let first = fn_val.get_first_param().unwrap();
         let self_ptr = first.into_pointer_value();
 
-        // Install Vtable
-        let vtable_name = &format!("{}_vtable", name);
-        let ptr = self
-            .module
-            .get_global(vtable_name)
-            .unwrap()
-            .as_pointer_value();
-
+        // Class id
         let pointee_ty = self.context.get_struct_type(name).unwrap();
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_ptr, VTABLE_IND, "gep")
+            .build_struct_gep(pointee_ty, self_ptr, CLASS_ID_IND, "gep")
             .unwrap();
-        self.builder.build_store(field, ptr).unwrap();
+        self.builder.build_store(field, class_id).unwrap();
 
         // Code Body
         code_body(self, name, self_ptr);
@@ -123,46 +117,48 @@ impl<'ctx> CodeGenManager<'ctx> {
     fn code_empty_init_body(&mut self, _name: &str, _self_alloca: PointerValue) {}
 
     fn code_int_init_body(&mut self, _name: &str, self_alloca: PointerValue) {
-        let pointee_ty = self.context.get_struct_type("Int").unwrap();
         // set val = 0
-        let value = self.context.i32_type().const_int(0, false);
+        let value = self.i32_ty.const_int(0, false);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, INT_VAL_IND, "gep")
+            .build_struct_gep(self.cl_int_ty, self_alloca, INT_VAL_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value).unwrap();
     }
 
     fn code_bool_init_body(&mut self, _name: &str, self_alloca: PointerValue) {
-        let pointee_ty = self.context.get_struct_type("Bool").unwrap();
         // set val = false
-        let value = self.context.bool_type().const_int(0, false);
+        let value = self.bool_ty.const_int(0, false);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, BOOL_VAL_IND, "gep")
+            .build_struct_gep(self.cl_bool_ty, self_alloca, BOOL_VAL_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value).unwrap();
     }
 
     fn code_string_init_body(&mut self, _name: &str, self_alloca: PointerValue) {
-        let pointee_ty = self.context.get_struct_type("String").unwrap();
         // set Length = 0
-        let value = self.context.i32_type().const_int(0, false);
+        let value = self.i32_ty.const_int(0, false);
         let value_ptr = self.code_new_int(value);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, STRING_LEN_IND, "gep")
+            .build_struct_gep(self.cl_string_ty, self_alloca, STRING_LEN_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value_ptr).unwrap();
 
         // set ptr -> ""
 
-        let value = self.context.i8_type().const_array(&[]);
+        let value = self.i8_ty.const_array(&[]);
         let field = self
             .builder
-            .build_struct_gep(pointee_ty, self_alloca, STRING_CONTENT_IND, "gep")
+            .build_struct_gep(self.cl_string_ty, self_alloca, STRING_CONTENT_IND, "gep")
             .unwrap();
         self.builder.build_store(field, value).unwrap();
+    }
+
+    pub fn sym_to_class_id_int_val(&self, s: &Sym) -> IntValue<'ctx> {
+        self.i32_ty
+            .const_int(self.ct.class_id[s].to_owned().try_into().unwrap(), false)
     }
 
     fn code_native_inits(&mut self) {
@@ -182,7 +178,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 if ["Int", "Bool", "String"].contains(&key) {
                     self.code_new_and_init(typ)
                 } else {
-                    self.context.ptr_type(self.aspace).const_null()
+                    self.ptr_ty.const_null()
                 }
             } else {
                 self.codegen(init)
@@ -206,41 +202,36 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.code_native_inits();
 
         let classes = self.ct.program_classes.clone();
-        for class in classes.iter() {
-            self.code_init_for_class(class.to_owned());
+        for cls in classes.iter() {
+            // Register class id for program class
+            self.code_init_for_class(cls.to_owned());
         }
     }
 
     // External functions.
 
     fn declare_puts(&self) {
-        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let fn_type = self.context.i32_type().fn_type(&[input_type], false);
+        let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], false);
         self.module
             .add_function("puts", fn_type, Some(Linkage::External));
     }
 
     fn declare_strlen(&self) {
-        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
-        let fn_type = self.context.i32_type().fn_type(&[input_type], false);
+        let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], false);
         self.module
             .add_function("strlen", fn_type, Some(Linkage::External));
     }
 
     fn declare_strcmp(&self) {
-        let input_type = BasicMetadataTypeEnum::PointerType(self.context.ptr_type(self.aspace));
         let fn_type = self
-            .context
-            .i32_type()
-            .fn_type(&[input_type, input_type], false);
+            .i32_ty
+            .fn_type(&[self.ptr_ty.into(), self.ptr_ty.into()], false);
         self.module
             .add_function("strcmp", fn_type, Some(Linkage::External));
     }
 
     fn declare_gets(&self) {
-        //let array_type = self.context.i8_type().array_type(2);
-        let typ = self.context.ptr_type(self.aspace);
-        let fn_type = typ.fn_type(&[typ.into()], false);
+        let fn_type = self.ptr_ty.fn_type(&[self.ptr_ty.into()], false);
         self.module
             .add_function("gets", fn_type, Some(Linkage::External));
     }
@@ -264,11 +255,10 @@ impl<'ctx> CodeGenManager<'ctx> {
         let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
         let arg = fn_val.get_last_param().unwrap().into_pointer_value();
-        let pointee_ty = self.context.get_struct_type("String").unwrap();
         // Get String array from second field of *String
         let to_print_field = self
             .builder
-            .build_struct_gep(pointee_ty, arg, STRING_CONTENT_IND, "gep")
+            .build_struct_gep(self.cl_string_ty, arg, STRING_CONTENT_IND, "gep")
             .unwrap();
 
         let puts_fn = self.module.get_function("puts").unwrap();
@@ -285,14 +275,11 @@ impl<'ctx> CodeGenManager<'ctx> {
         let fn_name = method_ref(&sym(IO), &sym(IN_STRING));
         let (_fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
-        let buff_size = self.context.i32_type().const_int(MAX_IN_STRING_LEN, false);
-        let array_type = self
-            .context
-            .i8_type()
-            .array_type(MAX_IN_STRING_LEN.try_into().unwrap());
+        let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
+        let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
         let dest_ptr = self
             .builder
-            .build_array_malloc(self.context.i8_type(), buff_size, "buffer_ptr")
+            .build_array_malloc(self.i8_ty, buff_size, "buffer_ptr")
             .unwrap();
 
         // Warning message
@@ -354,10 +341,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.variables.enter_scope();
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             let arg_name = all_parameters[i].name.clone();
-            let alloca = self
-                .builder
-                .build_alloca(self.context.ptr_type(self.aspace), &arg_name)
-                .unwrap();
+            let alloca = self.builder.build_alloca(self.ptr_ty, &arg_name).unwrap();
 
             self.builder.build_store(alloca, arg).unwrap();
 
@@ -424,24 +408,17 @@ impl<'ctx> CodeGenManager<'ctx> {
         // 1) create an instance of the Main class and
         // 2) call *that* class's `main` method (ie. Main.main).
 
-        let return_type = self.context.void_type();
-        let fn_type = return_type.fn_type(&[], false);
+        let fn_type = self.context.void_type().fn_type(&[], false);
         let fn_name = "main";
         let fn_val = self.module.add_function(fn_name, fn_type, None);
         let block_name = &format!("{}_entry", fn_name);
         let entry = self.context.append_basic_block(fn_val, block_name);
         self.builder.position_at_end(entry);
 
-        // So far the vtables are full of null-pointers.  Install proper function pointers.
-        // self.initialize_vtables();
-
-        let main_instance =
-            BasicMetadataValueEnum::PointerValue(self.code_new_and_init(&sym("Main")));
-
         let main_dot_main = self.module.get_function("Main.main").unwrap();
-
+        let main_instance = self.code_new_and_init(&sym("Main"));
         self.builder
-            .build_call(main_dot_main, &[main_instance], "call_Main.main")
+            .build_call(main_dot_main, &[main_instance.into()], "call_Main.main")
             .unwrap();
 
         self.builder.build_return(None).unwrap();

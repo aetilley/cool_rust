@@ -1,6 +1,5 @@
 use crate::symbol::Sym;
-
-// TODO make these usize
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 // Type Names
 pub const BOOL: &str = "Bool";
@@ -17,9 +16,10 @@ pub const INIT: &str = "init";
 pub const TRUE: &str = "true";
 pub const FALSE: &str = "false";
 
-pub const VTABLE_IND: u32 = 0;
-
+pub const CLASS_ID_IND: u32 = 0;
 pub const OBJECT_PREFIX_SIZE: u32 = 1;
+
+pub const VTABLE_MASTER_VECTOR: &str = "vtable_master_vector";
 
 pub const INT_VAL_IND: u32 = 1;
 pub const BOOL_VAL_IND: u32 = 1;
@@ -41,8 +41,6 @@ pub fn method_ref(cls_name: &Sym, method_name: &Sym) -> String {
 pub fn vtable_ref(cls_name: &Sym) -> String {
     format!("{}_vtable", cls_name)
 }
-
-use std::hash::{DefaultHasher, Hash, Hasher};
 
 pub fn init_ref(cls: &Sym) -> String {
     format!("{}_init", cls)

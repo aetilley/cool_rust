@@ -2,7 +2,6 @@ mod codegen_constants;
 mod codegen_expr;
 mod codegen_functions;
 mod codegen_globals;
-mod codegen_structs;
 mod codegen_utils;
 
 use crate::ast::Program;
@@ -13,7 +12,7 @@ use crate::symbol::Sym;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::types::{IntType, PointerType};
+use inkwell::types::{IntType, PointerType, StructType};
 use inkwell::values::PointerValue;
 use inkwell::AddressSpace;
 
@@ -26,9 +25,15 @@ pub struct CodeGenManager<'ctx> {
     pub ct: ClassTable,
     pub current_class: Option<Sym>,
     pub current_fn: Option<Sym>,
-    pub int32ty: IntType<'ctx>,
-    pub boolty: IntType<'ctx>,
-    pub ptrty: PointerType<'ctx>,
+    pub i8_ty: IntType<'ctx>,
+    pub i32_ty: IntType<'ctx>,
+    pub bool_ty: IntType<'ctx>,
+    pub ptr_ty: PointerType<'ctx>,
+    pub cl_object_ty: StructType<'ctx>,
+    pub cl_io_ty: StructType<'ctx>,
+    pub cl_string_ty: StructType<'ctx>,
+    pub cl_int_ty: StructType<'ctx>,
+    pub cl_bool_ty: StructType<'ctx>,
 }
 
 impl<'ctx> CodeGenManager<'ctx> {
@@ -51,9 +56,40 @@ impl<'ctx> CodeGenManager<'ctx> {
         );
         let current_class = None;
         let current_fn = None;
-        let int32ty = context.i32_type();
-        let boolty = context.bool_type();
-        let ptrty = context.ptr_type(aspace);
+        let i8_ty = context.i8_type();
+        let i32_ty = context.i32_type();
+        let bool_ty = context.bool_type();
+        let ptr_ty = context.ptr_type(aspace);
+
+        let cl_object_ty = context.opaque_struct_type("Object");
+        let cl_io_ty = context.opaque_struct_type("IO");
+        let cl_string_ty = context.opaque_struct_type("String");
+        let cl_int_ty = context.opaque_struct_type("Int");
+        let cl_bool_ty = context.opaque_struct_type("Bool");
+
+        // class_id
+        let object_attrs = &[i32_ty.into()];
+        cl_object_ty.set_body(object_attrs, false);
+
+        // class_id
+        let io_attrs = &[i32_ty.into()];
+        cl_io_ty.set_body(io_attrs, false);
+
+        // class_id, value
+        let int_attrs = &[i32_ty.into(), i32_ty.into()];
+        cl_int_ty.set_body(int_attrs, false);
+
+        // class_id, value
+        let bool_attrs = &[i32_ty.into(), i32_ty.into()];
+        cl_bool_ty.set_body(bool_attrs, false);
+
+        // class_id, ptr to in for length, str content
+        let string_attrs = &[
+            i32_ty.into(),
+            ptr_ty.into(),
+            context.i8_type().array_type(0).into(),
+        ];
+        cl_string_ty.set_body(string_attrs, false);
 
         let mut man = CodeGenManager {
             context,
@@ -64,16 +100,22 @@ impl<'ctx> CodeGenManager<'ctx> {
             ct,
             current_class,
             current_fn,
-            int32ty,
-            boolty,
-            ptrty,
+            i8_ty,
+            i32_ty,
+            bool_ty,
+            ptr_ty,
+            cl_object_ty,
+            cl_io_ty,
+            cl_string_ty,
+            cl_int_ty,
+            cl_bool_ty,
         };
 
-        man.code_all_class_structs();
+        man.code_program_class_structs();
 
         man.code_all_method_declarations();
 
-        man.code_vtables();
+        man.code_vtable_master_vector();
 
         man.register_globals();
 

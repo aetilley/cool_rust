@@ -32,11 +32,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let self_ptr_alloc = self.variables.lookup(&sym(SELF)).unwrap();
                     let self_ptr = self
                         .builder
-                        .build_load(
-                            self.context.ptr_type(self.aspace),
-                            self_ptr_alloc,
-                            "self_ptr",
-                        )
+                        .build_load(self.ptr_ty, self_ptr_alloc, "self_ptr")
                         .unwrap()
                         .into_pointer_value();
                     self.store_pointer_value_into_pointer_at_struct(
@@ -55,7 +51,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 if let Some(alloc_ptr) = self.variables.lookup(id) {
                     let ptr = self
                         .builder
-                        .build_load(self.context.ptr_type(self.aspace), alloc_ptr, "arg_ptr")
+                        .build_load(self.ptr_ty, alloc_ptr, "arg_ptr")
                         .unwrap()
                         .into_pointer_value();
                     return ptr;
@@ -70,7 +66,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let self_ptr_alloc = self.variables.lookup(&sym(SELF)).unwrap();
                     let self_ptr = self
                         .builder
-                        .build_load(self.ptrty, self_ptr_alloc, "self_ptr")
+                        .build_load(self.ptr_ty, self_ptr_alloc, "self_ptr")
                         .unwrap()
                         .into_pointer_value();
                     return self.load_pointer_field_from_pointer_at_struct(
@@ -81,7 +77,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 }
                 panic!("No identifier {} in scope.", id);
             }
-            ExprData::NoExpr {} => self.ptrty.const_null(),
+            ExprData::NoExpr {} => self.ptr_ty.const_null(),
             ExprData::StrConst { val } => {
                 let global_name = global_string_ref(val);
                 // We may want to catch cases where the global is not found and do a malloc.  For now we panic.
@@ -111,10 +107,10 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let val = self.load_int_field_from_pointer_at_struct(
                     struct_ptr,
                     BOOL,
-                    self.context.bool_type(),
+                    self.bool_ty,
                     BOOL_VAL_IND,
                 );
-                let one = self.context.bool_type().const_int(1, false);
+                let one = self.bool_ty.const_int(1, false);
                 let negation = self.builder.build_xor(val, one, "negation").unwrap();
                 self.code_new_int(negation)
             }
@@ -133,13 +129,13 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let l_int_value = self.load_int_field_from_pointer_at_struct(
                     lhs_ptr,
                     INT,
-                    self.context.i32_type(),
+                    self.i32_ty,
                     INT_VAL_IND,
                 );
                 let r_int_value = self.load_int_field_from_pointer_at_struct(
                     rhs_ptr,
                     INT,
-                    self.context.i32_type(),
+                    self.i32_ty,
                     INT_VAL_IND,
                 );
                 let value = match data {
@@ -176,13 +172,13 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let l_int_value = self.load_int_field_from_pointer_at_struct(
                     lhs_ptr,
                     INT,
-                    self.context.i32_type(),
+                    self.i32_ty,
                     INT_VAL_IND,
                 );
                 let r_int_value = self.load_int_field_from_pointer_at_struct(
                     rhs_ptr,
                     INT,
-                    self.context.i32_type(),
+                    self.i32_ty,
                     INT_VAL_IND,
                 );
 
@@ -206,13 +202,13 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let l_int_value = self.load_int_field_from_pointer_at_struct(
                         lhs_ptr,
                         stype,
-                        self.context.i32_type(),
+                        self.i32_ty,
                         field_ind,
                     );
                     let r_int_value = self.load_int_field_from_pointer_at_struct(
                         rhs_ptr,
                         stype,
-                        self.context.i32_type(),
+                        self.i32_ty,
                         field_ind,
                     );
 
@@ -231,7 +227,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let l_array_field = self
                         .builder
                         .build_struct_gep(
-                            self.context.get_struct_type(STRING).unwrap(),
+                            self.cl_string_ty,
                             lhs_ptr,
                             STRING_CONTENT_IND,
                             "left string array field",
@@ -240,7 +236,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     let r_array_field = self
                         .builder
                         .build_struct_gep(
-                            self.context.get_struct_type(STRING).unwrap(),
+                            self.cl_string_ty,
                             rhs_ptr,
                             STRING_CONTENT_IND,
                             "right string array field",
@@ -267,7 +263,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                         .build_int_compare::<IntValue>(
                             IntPredicate::EQ,
                             strcmp_return,
-                            self.context.i32_type().const_zero(),
+                            self.i32_ty.const_zero(),
                             "are_equal_i1",
                         )
                         .unwrap();
@@ -298,7 +294,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 }
             }
             ExprData::Block { exprs } => {
-                let mut result: PointerValue = self.context.ptr_type(self.aspace).const_null();
+                let mut result: PointerValue = self.ptr_ty.const_null();
                 for expr in exprs.iter() {
                     result = self.codegen(expr);
                 }
@@ -313,13 +309,13 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let pred_val = self.load_int_field_from_pointer_at_struct(
                     bool_struct_ptr,
                     BOOL,
-                    self.context.bool_type(),
+                    self.bool_ty,
                     BOOL_VAL_IND,
                 );
                 // Note that we can't call the cond_builder utility because the two closure argument would have to be
                 // FnMut (and we can't have two of those closing around self at the same time).
 
-                let one_const = self.context.bool_type().const_int(1, false);
+                let one_const = self.bool_ty.const_int(1, false);
 
                 let pred: IntValue = self
                     .builder
@@ -358,10 +354,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 // emit merge block
                 self.builder.position_at_end(cont_bb);
 
-                let phi = self
-                    .builder
-                    .build_phi(self.context.ptr_type(self.aspace), "iftmp")
-                    .unwrap();
+                let phi = self.builder.build_phi(self.ptr_ty, "iftmp").unwrap();
 
                 phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
 
@@ -372,7 +365,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             ExprData::TypCase { expr, cases: _ } => {
                 let _val_struct_ptr = self.codegen(expr);
 
-                todo!();
+                todo!()
             }
             ExprData::Let {
                 id,
@@ -382,7 +375,10 @@ impl<'ctx> CodeGenManager<'ctx> {
             } => {
                 let val = self.codegen(init);
                 self.variables.enter_scope();
-                let val_alloc = self.builder.build_alloca(self.ptrty, "let alloca").unwrap();
+                let val_alloc = self
+                    .builder
+                    .build_alloca(self.ptr_ty, "let alloca")
+                    .unwrap();
                 self.builder.build_store(val_alloc, val).unwrap();
                 self.variables.add_binding(id, &val_alloc);
                 let result = self.codegen(body);
@@ -406,7 +402,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let pred_val = self.load_int_field_from_pointer_at_struct(
                     pred_struct_ptr,
                     BOOL,
-                    self.boolty,
+                    self.bool_ty,
                     BOOL_VAL_IND,
                 );
 
@@ -419,7 +415,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 self.builder.build_unconditional_branch(pred_block).unwrap();
 
                 self.builder.position_at_end(exit_block);
-                self.ptrty.const_null()
+                self.ptr_ty.const_null()
             }
 
             ExprData::Dispatch {
@@ -429,9 +425,37 @@ impl<'ctx> CodeGenManager<'ctx> {
             } => {
                 let slf_arg = self.codegen(slf);
 
-                // The following uses the static type not the dynamic type,
-                // but the desired function will have the same tag in the vtable
-                // for all subtypes, and the same function signature.
+                // Note we are guaranteed that the initial segment
+                // up to CLASS_ID_IND will be the same layout
+                // as that of "Object".
+                let class_id_field = self.load_int_field_from_pointer_at_struct(
+                    slf_arg,
+                    &sym("Object"),
+                    self.i32_ty,
+                    CLASS_ID_IND,
+                );
+
+                let vtable_master_pointer = self
+                    .module
+                    .get_global(VTABLE_MASTER_VECTOR)
+                    .unwrap()
+                    .as_pointer_value();
+
+                let vtable_master_ty = self
+                    .ptr_ty
+                    .vec_type(self.ct.class_id_order.len().try_into().unwrap());
+                let vtable_master_vector = self
+                    .builder
+                    .build_load(vtable_master_ty, vtable_master_pointer, "VtableMaster")
+                    .unwrap()
+                    .into_vector_value();
+
+                let vtable_pointer = self
+                    .builder
+                    .build_extract_element(vtable_master_vector, class_id_field, "vtable pointer")
+                    .unwrap()
+                    .into_pointer_value();
+
                 let mut static_type = &slf.stype;
                 if static_type == &sym("SELF_TYPE") {
                     static_type = match &self.current_class {
@@ -441,7 +465,8 @@ impl<'ctx> CodeGenManager<'ctx> {
                         }
                     }
                 }
-
+                // Using the static type is ok here because the offset of the method is the same in
+                // all types that that inherit from it.
                 let vtable_offset: u32 = self
                     .ct
                     .class_method_order
@@ -453,29 +478,8 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .try_into()
                     .unwrap();
 
-                // Note we are guaranteed that the initial segment
-                // of the struct will be the layout of static_type.
-                // In fact we only need the first field which is the same in all
-                // classes.
-                let pointee_ty = self.context.get_struct_type(static_type).unwrap();
-                let vtable_pointer_field = self
-                    .builder
-                    .build_struct_gep(pointee_ty, slf_arg, VTABLE_IND, "get_vtable_pointer_field")
-                    .unwrap();
-
-                let vtable_pointer = self
-                    .builder
-                    .build_load(
-                        self.context.ptr_type(self.aspace),
-                        vtable_pointer_field,
-                        "get vtable pointer",
-                    )
-                    .unwrap()
-                    .into_pointer_value();
-
                 let vtable_type = self
-                    .context
-                    .ptr_type(self.aspace)
+                    .ptr_ty
                     .array_type(self.ct.get_max_vtable_size().try_into().unwrap());
 
                 let vtable_array = self
@@ -486,7 +490,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 let method_pointer = self
                     .builder
-                    .build_extract_value(vtable_array, vtable_offset, "method ptr")
+                    .build_extract_value(vtable_array, vtable_offset, "method pointer")
                     .unwrap()
                     .into_pointer_value();
 
@@ -501,39 +505,32 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 let fn_name = &method_ref(&sym("<Dynamic>"), method_name);
 
-                let mut compiled_args: Vec<PointerValue> = vec![slf_arg];
+                let mut compiled_args: Vec<BasicMetadataValueEnum> = vec![slf_arg.into()];
                 for arg in args.iter() {
                     let compiled_arg = self.codegen(arg);
-                    compiled_args.push(compiled_arg);
+                    compiled_args.push(compiled_arg.into());
                 }
-                let md_args: Vec<BasicMetadataValueEnum> = compiled_args
-                    .into_iter()
-                    .map(BasicMetadataValueEnum::PointerValue)
-                    .collect();
+
                 let call_name = &format!("{}_call", fn_name);
 
                 // Call the function.
                 let result = self
                     .builder
-                    .build_indirect_call(fn_type, method_pointer, &md_args, call_name)
+                    .build_indirect_call(fn_type, method_pointer, &compiled_args, call_name)
                     .unwrap()
                     .try_as_basic_value();
 
                 match result {
                     Left(BasicValueEnum::PointerValue(ptr)) => ptr,
-                    _ => self.context.ptr_type(self.aspace).const_null(),
+                    _ => self.ptr_ty.const_null(),
                 }
             }
 
             ExprData::Comp { expr } => {
                 // Integer complement (flip every bit)
                 let val = self.codegen(expr);
-                let inner = self.load_int_field_from_pointer_at_struct(
-                    val,
-                    INT,
-                    self.context.i32_type(),
-                    INT_VAL_IND,
-                );
+                let inner =
+                    self.load_int_field_from_pointer_at_struct(val, INT, self.i32_ty, INT_VAL_IND);
                 let inverted = self.builder.build_not(inner, "inverted").unwrap();
                 self.code_new_int(inverted)
             }
@@ -545,27 +542,23 @@ impl<'ctx> CodeGenManager<'ctx> {
                 slf,
             } => {
                 let slf_arg = self.codegen(slf);
-                let mut compiled_args: Vec<PointerValue> = vec![slf_arg];
+                let mut compiled_args: Vec<BasicMetadataValueEnum> = vec![slf_arg.into()];
                 for arg in args.iter() {
                     let compiled_arg = self.codegen(arg);
-                    compiled_args.push(compiled_arg);
+                    compiled_args.push(compiled_arg.into());
                 }
                 let fn_name = &method_ref(typ, method_name);
                 let fn_val = self.module.get_function(fn_name).unwrap();
-                let md_args: Vec<BasicMetadataValueEnum> = compiled_args
-                    .into_iter()
-                    .map(BasicMetadataValueEnum::PointerValue)
-                    .collect();
                 let call_name = &format!("{}_call", fn_name);
 
                 let result = self
                     .builder
-                    .build_call(fn_val, &md_args[..], call_name)
+                    .build_call(fn_val, &compiled_args[..], call_name)
                     .unwrap()
                     .try_as_basic_value();
                 match result {
                     Left(BasicValueEnum::PointerValue(ptr)) => ptr,
-                    _ => self.context.ptr_type(self.aspace).const_null(),
+                    _ => self.ptr_ty.const_null(),
                 }
             }
         }

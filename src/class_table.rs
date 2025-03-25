@@ -20,6 +20,8 @@ type VTableTy = HashMap<Sym, Sym>;
 type ClassVTableTy = HashMap<Sym, VTableTy>;
 type MethodOrderTy = Vec<Sym>;
 type ClassMethodOrderTy = HashMap<Sym, MethodOrderTy>;
+type ClassIdTy = HashMap<Sym, i32>;
+type ClassIdOrderTy = Vec<Sym>;
 
 #[derive(Debug, PartialEq)]
 pub struct ClassTable {
@@ -31,6 +33,8 @@ pub struct ClassTable {
     pub class_attrs: ClassAttrTy,
     pub class_vtable: ClassVTableTy,
     pub class_method_order: ClassMethodOrderTy,
+    pub class_id: ClassIdTy,
+    pub class_id_order: ClassIdOrderTy,
 }
 
 impl ClassTable {
@@ -76,6 +80,15 @@ impl ClassTable {
             );
         }
 
+        let mut class_id = HashMap::<Sym, i32>::new();
+        let mut class_id_order = Vec::<Sym>::new();
+
+        // We sort for testing purposes.
+        for (i, cls) in sorted(all_class_names.iter()).enumerate() {
+            class_id_order.push(cls.clone());
+            class_id.insert(cls.clone(), i.try_into().unwrap());
+        }
+
         //let native_class_names = native_classes.map
         Ok(ClassTable {
             native_classes: native_class_names,
@@ -86,6 +99,8 @@ impl ClassTable {
             class_attrs,
             class_vtable,
             class_method_order,
+            class_id,
+            class_id_order,
         })
     }
 
@@ -488,7 +503,7 @@ mod class_table_tests {
     }
 
     #[test]
-    fn test_constructor() {
+    fn test_class_table_constructor() {
         let code: &str = r"
         class Apple {
             a: Int <- 2 + 3;
@@ -644,6 +659,26 @@ mod class_table_tests {
             sym("Orange") => vec![sym("abort"), sym("copy"), sym("type_name"), sym("foo"), sym("bar")],
         );
 
+        let desired_class_id = hash_map!(
+            sym("Apple") => 0,
+            sym("Bool") => 1,
+            sym("IO") => 2,
+            sym("Int") => 3,
+            sym("Object") => 4,
+            sym("Orange") => 5,
+            sym("String") => 6,
+        );
+
+        let desired_class_id_order = vec![
+            sym("Apple"),
+            sym("Bool"),
+            sym("IO"),
+            sym("Int"),
+            sym("Object"),
+            sym("Orange"),
+            sym("String"),
+        ];
+
         assert_eq!(result.program_classes, desired_program_classes);
         assert_eq!(result.native_classes, desired_native_classes);
         assert_eq!(result.class_parent, desired_class_parent);
@@ -651,8 +686,9 @@ mod class_table_tests {
         assert_eq!(result.class_methods, desired_class_methods);
         assert_eq!(result.class_attrs, desired_class_attrs);
         assert_eq!(result.class_vtable, desired_class_vtable);
-
         assert_eq!(result.class_method_order, desired_class_method_order);
+        assert_eq!(result.class_id, desired_class_id);
+        assert_eq!(result.class_id_order, desired_class_id_order);
     }
 
     #[test]
