@@ -20,6 +20,7 @@ pub const CLASS_ID_IND: u32 = 0;
 pub const OBJECT_PREFIX_SIZE: u32 = 1;
 
 pub const VTABLE_MASTER_VECTOR: &str = "vtable_master_vector";
+pub const PARENT_VECTOR: &str = "parent_vector";
 
 pub const INT_VAL_IND: u32 = 1;
 pub const BOOL_VAL_IND: u32 = 1;
@@ -34,6 +35,12 @@ pub const MAX_IN_STRING_LEN: u64 = 100;
 pub const OUT_STRING: &str = "out_string";
 pub const IN_STRING: &str = "in_string";
 pub const OUT_INT: &str = "out_int";
+pub const IS_SUBTYPE: &str = "is_subtype";
+pub const MIN_BOUND_FINDER: &str = "min_bound_finder";
+pub const TYPE_IS_MEMBER: &str = "type_is_member";
+pub const CASE_SELECTOR: &str = "case_selector";
+
+pub const ENTRY: &str = "main";
 
 pub fn method_ref(cls_name: &Sym, method_name: &Sym) -> String {
     format!("{}.{}", cls_name, method_name)

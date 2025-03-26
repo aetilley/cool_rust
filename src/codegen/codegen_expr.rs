@@ -1,10 +1,11 @@
 // Expr Codegen
 
-use crate::ast::{Expr, ExprData, Formal};
+use crate::ast::{Case, Expr, ExprData, Formal};
 use crate::symbol::{sym, Sym};
 use either::Either::Left;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+
 
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
@@ -117,7 +118,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             ExprData::IsVoid { expr } => {
                 let val = self.codegen(expr);
                 let is_null = self.builder.build_is_null(val, "isnull").unwrap();
-                self.get_bool_for_value(is_null)
+                self.get_bool_for_value(is_null, None)
             }
 
             ExprData::Plus { lhs, rhs }
@@ -187,7 +188,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .build_int_compare::<IntValue>(comp_op, l_int_value, r_int_value, "ifcond")
                     .unwrap();
 
-                self.get_bool_for_value(does_compare)
+                self.get_bool_for_value(does_compare, None)
             }
             ExprData::Eq { lhs, rhs } => {
                 let lhs_ptr = self.codegen(lhs);
@@ -222,7 +223,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                         )
                         .unwrap();
 
-                    self.get_bool_for_value(are_equal)
+                    self.get_bool_for_value(are_equal, None)
                 } else if stype == STRING {
                     let l_array_field = self
                         .builder
@@ -268,7 +269,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                         )
                         .unwrap();
 
-                    self.get_bool_for_value(are_equal)
+                    self.get_bool_for_value(are_equal, None)
                 } else {
                     let lhs_to_int = self
                         .builder
@@ -290,7 +291,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                         )
                         .unwrap();
 
-                    self.get_bool_for_value(are_equal)
+                    self.get_bool_for_value(are_equal, None)
                 }
             }
             ExprData::Block { exprs } => {
@@ -362,7 +363,50 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 phi_basic.into_pointer_value()
             }
-            ExprData::TypCase { expr, cases } => self.code_typecase(expr, cases),
+            ExprData::TypCase { expr, cases } => {
+                println!("Generating code for {:?} and {:?}", expr, cases);
+                let val = self.codegen(expr);
+
+                let mut types = Vec::<IntValue>::new();
+                for Case {
+                    id: _,
+                    typ,
+                    expr: _,
+                } in cases.iter()
+                {
+                    types.push(self.sym_to_class_id_int_val(typ));
+                }
+                let membership_predicate = self.code_membership_predicate_for_types(&types);
+                let min_finder = self.code_min_bound_finder_for_predicate(membership_predicate);
+
+                let class_id = self.load_int_field_from_pointer_at_struct(
+                    val,
+                    OBJECT,
+                    self.i32_ty,
+                    CLASS_ID_IND,
+                );
+                let min_bound_id = self
+                    .builder
+                    .build_call(min_finder, &[class_id.into()], "min type")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+
+                let selector = self.build_select_and_eval_case_for_cases(cases);
+
+                let result = self
+                .builder
+                .build_call(selector, &[val.into(), min_bound_id.into()], "result")
+                .unwrap()
+                .try_as_basic_value()
+                .left()
+                .unwrap()
+                .into_pointer_value();
+                
+                result
+            }
             ExprData::Let {
                 id,
                 typ: _,

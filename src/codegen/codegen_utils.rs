@@ -1,10 +1,13 @@
-use crate::ast::{Cases, Expr};
+use crate::ast::{Case, Cases, Expr};
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
-use inkwell::types::{ArrayType, IntType};
-use inkwell::values::PointerValue;
+use inkwell::types::{ArrayType, BasicTypeEnum, IntType};
 use inkwell::values::{ArrayValue, IntValue};
+use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::IntPredicate;
+
+use std::collections::HashSet;
 
 impl<'ctx> CodeGenManager<'ctx> {
     pub fn code_array_value_from_sym(&self, s: &Sym) -> ArrayValue<'ctx> {
@@ -207,7 +210,11 @@ impl<'ctx> CodeGenManager<'ctx> {
     //         .unwrap()
     // }
 
-    pub fn get_bool_for_value(&self, pred: IntValue) -> PointerValue<'ctx> {
+    pub fn get_bool_for_value(
+        &self,
+        pred: IntValue,
+        parent: Option<FunctionValue>,
+    ) -> PointerValue<'ctx> {
         let then_val = self
             .module
             .get_global(&global_bool_ref(true))
@@ -220,25 +227,31 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap()
             .as_pointer_value();
 
-        self.cond_builder(pred, || then_val, || else_val)
+        self.cond_builder(pred, || then_val, || else_val, self.ptr_ty.into(), parent)
+            .into_pointer_value()
     }
 
-    pub fn cond_builder<F1: Fn() -> PointerValue<'ctx>, F2: Fn() -> PointerValue<'ctx>>(
+    pub fn cond_builder<Ret: BasicValue<'ctx>, F1: Fn() -> Ret, F2: Fn() -> Ret>(
         &self,
         pred: IntValue,
         then_fn: F1,
         else_fn: F2,
-    ) -> PointerValue<'ctx> {
+        typ: BasicTypeEnum<'ctx>,
+        parent: Option<FunctionValue>,
+    ) -> BasicValueEnum<'ctx> {
         // Allows us to return the globals instead of allocating a new boolean each time.
 
-        let parent = self
-            .module
-            .get_function(self.current_fn.as_ref().unwrap())
-            .unwrap();
+        let p = match parent {
+            None => self
+                .module
+                .get_function(self.current_fn.as_ref().unwrap())
+                .unwrap(),
+            Some(fn_val) => fn_val,
+        };
 
-        let then_bb = self.context.append_basic_block(parent, "then");
-        let else_bb = self.context.append_basic_block(parent, "else");
-        let cont_bb = self.context.append_basic_block(parent, "ifcont");
+        let then_bb = self.context.append_basic_block(p, "then");
+        let else_bb = self.context.append_basic_block(p, "else");
+        let cont_bb = self.context.append_basic_block(p, "ifcont");
 
         self.builder
             .build_conditional_branch(pred, then_bb, else_bb)
@@ -263,6 +276,185 @@ impl<'ctx> CodeGenManager<'ctx> {
         // emit merge block
         self.builder.position_at_end(cont_bb);
 
+        let phi = self.builder.build_phi(typ, "iftmp").unwrap();
+
+        phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
+
+        let phi_basic = phi.as_basic_value();
+
+        phi_basic
+    }
+
+    // Utils for Typcase
+
+    pub fn code_is_member_of_set(
+        &self,
+        arg_type: IntValue<'ctx>,
+        mut types: Vec<IntValue<'ctx>>,
+    ) -> IntValue<'ctx> {
+        if types.len() == 0 {
+            // Empty set, return false.
+            return self.bool_ty.const_int(0, false);
+        }
+        // Else pop one element, compare, and recurse.
+        let head = types.pop().unwrap();
+        let lhs: IntValue = self
+            .builder
+            .build_int_compare::<IntValue>(IntPredicate::EQ, arg_type, head, "equal types")
+            .unwrap();
+
+        let rhs = self.code_is_member_of_set(arg_type, types);
+
+        self.builder.build_or(lhs, rhs, "is_member").unwrap()
+    }
+
+    pub fn code_membership_predicate_for_types(
+        &self,
+        types: &Vec<IntValue<'ctx>>,
+    ) -> FunctionValue<'ctx> {
+        let fn_type = self.bool_ty.fn_type(&[self.i32_ty.into()], false);
+        let fn_val = self.module.add_function(TYPE_IS_MEMBER, fn_type, None);
+        fn_val
+            .get_last_param()
+            .unwrap()
+            .into_int_value()
+            .set_name("arg_type");
+
+        let (_, _) = self.code_function_entry(TYPE_IS_MEMBER);
+
+        let arg_type = fn_val.get_first_param().unwrap().into_int_value();
+
+        let result = self.code_is_member_of_set(arg_type, types.clone());
+
+        self.builder.build_return(Some(&result)).unwrap();
+
+        fn_val
+    }
+
+    pub fn code_min_bound_finder_for_predicate(
+        &self,
+        membership_predicate: FunctionValue<'ctx>,
+    ) -> FunctionValue<'ctx> {
+        let fn_type = self.bool_ty.fn_type(&[self.i32_ty.into()], false);
+        let fn_val = self.module.add_function(MIN_BOUND_FINDER, fn_type, None);
+        fn_val
+            .get_last_param()
+            .unwrap()
+            .into_int_value()
+            .set_name("arg_type");
+
+        let (_, _) = self.code_function_entry(MIN_BOUND_FINDER);
+
+        let arg_type = fn_val.get_first_param().unwrap().into_int_value();
+
+        let types_contain_arg_type = self
+            .builder
+            .build_call(membership_predicate, &[arg_type.into()], "is_member")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+
+        let return_arg_type = || arg_type;
+        let recurse = || {
+            // Get parent type
+            let parent_vector_pointer = self
+                .module
+                .get_global(PARENT_VECTOR)
+                .unwrap()
+                .as_pointer_value();
+            let parent_vector_ty = self
+                .i32_ty
+                .vec_type(self.ct.class_id_order.len().try_into().unwrap());
+            let parent_vector = self
+                .builder
+                .build_load(parent_vector_ty, parent_vector_pointer, "Parent Vector")
+                .unwrap()
+                .into_vector_value();
+            let arg_type_parent = self
+                .builder
+                .build_extract_element(parent_vector, arg_type, "arg_type_parent")
+                .unwrap();
+            // Recursively call this function on parent
+            self.builder
+                .build_call(fn_val, &[arg_type_parent.into()], "recurse")
+                .unwrap()
+                .try_as_basic_value()
+                .left()
+                .unwrap()
+                .into_int_value()
+        };
+
+        let result = self.cond_builder(
+            types_contain_arg_type,
+            return_arg_type,
+            recurse,
+            self.i32_ty.into(),
+            Some(fn_val),
+        );
+
+        self.builder.build_return(Some(&result)).unwrap();
+
+        fn_val
+    }
+
+    pub fn code_select_and_eval_case(
+        &mut self,
+        value_arg: PointerValue,
+        type_arg: IntValue,
+        mut cases: Cases,
+        parent: FunctionValue,
+    ) -> PointerValue<'ctx> {
+        if cases.is_empty() {
+            // Should never get here if program passes typechecking.
+            return self.ptr_ty.const_null();
+        }
+        let case = cases.pop().unwrap();
+        let case_type = self.sym_to_class_id_int_val(&case.typ);
+
+        // Can't use cond_builder because closures are FnOnce.
+        let then_bb = self.context.append_basic_block(parent, "then");
+        let else_bb = self.context.append_basic_block(parent, "else");
+        let cont_bb = self.context.append_basic_block(parent, "ifcont");
+
+        let found_match: IntValue = self
+            .builder
+            .build_int_compare::<IntValue>(IntPredicate::EQ, type_arg, case_type, "equal types")
+            .unwrap();
+
+        self.builder
+            .build_conditional_branch(found_match, then_bb, else_bb)
+            .unwrap();
+
+        // build then block
+        self.builder.position_at_end(then_bb);
+        let id = case.id;
+        self.variables.enter_scope();
+        let case_alloca = self
+            .builder
+            .build_alloca(self.ptr_ty, "case binding alloca")
+            .unwrap();
+        self.builder.build_store(case_alloca, value_arg).unwrap();
+        self.variables.add_binding(&id, &case_alloca);
+        let then_val = self.codegen(&case.expr);
+        self.variables.exit_scope();
+
+        self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+        let then_bb = self.builder.get_insert_block().unwrap();
+
+        // build else block
+        self.builder.position_at_end(else_bb);
+        let else_val = self.code_select_and_eval_case(value_arg, type_arg, cases, parent);
+
+        self.builder.build_unconditional_branch(cont_bb).unwrap();
+
+        let else_bb = self.builder.get_insert_block().unwrap();
+
+        // emit merge block
+        self.builder.position_at_end(cont_bb);
+
         let phi = self.builder.build_phi(self.ptr_ty, "iftmp").unwrap();
 
         phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
@@ -272,7 +464,25 @@ impl<'ctx> CodeGenManager<'ctx> {
         phi_basic.into_pointer_value()
     }
 
-    pub fn code_typecase(&self, _expr: &Expr, _cases: &Cases) -> PointerValue<'ctx> {
-        todo!()
+    pub fn build_select_and_eval_case_for_cases(&mut self, cases: &Cases) -> FunctionValue<'ctx> {
+
+        let fn_type = self
+            .ptr_ty
+            .fn_type(&[self.ptr_ty.into(), self.i32_ty.into()], false);
+        let fn_val = self.module.add_function(CASE_SELECTOR, fn_type, None);
+
+        fn_val.get_first_param().unwrap().set_name("val");
+        fn_val.get_last_param().unwrap().set_name("type");
+
+        let (_, _) = self.code_function_entry(CASE_SELECTOR);
+
+        let value_arg = fn_val.get_first_param().unwrap().into_pointer_value();
+        let type_arg = fn_val.get_last_param().unwrap().into_int_value();
+
+        let result = self.code_select_and_eval_case(value_arg, type_arg, cases.clone(), fn_val);
+
+        self.builder.build_return(Some(&result)).unwrap();
+
+        fn_val
     }
 }

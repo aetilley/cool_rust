@@ -119,6 +119,8 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         man.code_vtable_master_vector();
 
+        man.code_parent_vector();
+
         man.register_globals();
 
         man.code_all_inits();
@@ -153,20 +155,25 @@ mod codegen_tests {
     use assert_cmd::prelude::*;
     use predicates::prelude::*;
     use std::process::Command;
+    use crate::codegen::codegen_constants::*;
+    use crate::symbol::sym;
     use std::{env, fs};
 
     fn compile_run_assert_output_eq(code: &str, output: &str) {
+        let mut program = Program::parse_from(code).unwrap();
+        program.semant().unwrap();
+        program.to_llvm("test_tmp.ll");
+        run_assert_output_eq("test_tmp.ll", output);
+    }
+
+    fn run_assert_output_eq(filename: &str, output: &str) {
         let llvm_dir = env::var("LLVM_PATH").unwrap();
         let llc_path = format!("{}/bin/llc", llvm_dir);
         let clang_path = format!("{}/bin/clang", llvm_dir);
         let crate_root = std::env::current_dir().unwrap().display().to_string();
         let binary_path = format!("{}/test_tmp", crate_root);
 
-        let mut program = Program::parse_from(code).unwrap();
-        program.semant().unwrap();
-        program.to_llvm("test_tmp.ll");
-
-        Command::new(llc_path).arg("test_tmp.ll").assert().success();
+        Command::new(llc_path).arg(filename).assert().success();
         Command::new(clang_path.clone())
             .arg("test_tmp.s")
             .arg("-c")
@@ -552,5 +559,96 @@ class Main {
 };
 "#;
         compile_run_assert_output_eq(code, "YES\nYES\nYES\nYES\nYES\nYES\n");
+    }
+
+
+    #[test]
+    fn test_codegen_typecase() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+    main() : Object {
+        case 42 of 
+        y : Object => io.out_string("Object");
+        x : Int => io.out_int(x + 2);
+        esac
+    };
+};
+"#;
+    compile_run_assert_output_eq(code, "YES");
+
+    }
+
+    #[test]
+    fn test_codegen_is_subtype() {
+        let code = r#"
+        class Apple {
+            greet() : Object {
+            (new IO).out_string("Hello World!")};
+        };
+        
+        class Orange inherits Apple {
+            greet() : Object {(new IO).out_string("Hola Mundo!")};
+        };
+        
+        class Main {
+            a: Apple <- new Apple;
+            b: Apple <- new Orange;
+            main() : 
+            Object {{
+                a.greet();
+                b.greet();
+            }}; 
+        };
+        "#;
+
+        let mut program = Program::parse_from(code).unwrap();
+        program.semant().unwrap();
+
+        let context = Context::create();
+        let man = CodeGenManager::from(&context, &program);
+
+        let main = man.module.get_function(ENTRY).unwrap();
+        unsafe {main.delete();}
+        // Redefine main to be our test code.
+        let fn_type = man.context.void_type().fn_type(&[], false);
+        let fn_name = ENTRY;
+        let fn_val = man.module.add_function(fn_name, fn_type, None);
+        let block_name = &format!("{}_entry", fn_name);
+        let entry = man.context.append_basic_block(fn_val, block_name);
+        man.builder.position_at_end(entry);
+
+        let is_subtype = man.module.get_function(IS_SUBTYPE).unwrap();
+        let int1 = man.sym_to_class_id_int_val(&sym("Orange"));
+        let int2 = man.sym_to_class_id_int_val(&sym("Apple"));
+        let ret = man
+            .builder
+            .build_call(is_subtype, &[int1.into(), int2.into()], "is_subtype")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+        let ret_cast = man
+            .builder
+            .build_int_z_extend(ret, man.i32_ty, "cats to i32")
+            .unwrap();
+        let int_struct = man.code_new_int(ret_cast);
+
+        let io_struct = man.code_new_and_init(&sym(IO));
+        let _ = man
+            .builder
+            .build_call(
+                man.module.get_function("IO.out_int").unwrap(),
+                &[io_struct.into(), int_struct.into()],
+                "is_subtype",
+            )
+            .unwrap();
+        man.builder.build_return(None).unwrap();
+        fn_val.verify(false);
+
+        man.module.verify().unwrap();
+        man.module.print_to_file("test_tmp.ll").unwrap();
+        run_assert_output_eq("test_tmp.ll", "1");
     }
 }
