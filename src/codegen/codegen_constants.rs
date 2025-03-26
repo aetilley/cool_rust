@@ -33,6 +33,7 @@ pub const MAX_IN_STRING_LEN: u64 = 100;
 
 pub const OUT_STRING: &str = "out_string";
 pub const IN_STRING: &str = "in_string";
+pub const OUT_INT: &str = "out_int";
 
 pub fn method_ref(cls_name: &Sym, method_name: &Sym) -> String {
     format!("{}.{}", cls_name, method_name)

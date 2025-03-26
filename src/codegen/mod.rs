@@ -67,6 +67,8 @@ impl<'ctx> CodeGenManager<'ctx> {
         let cl_int_ty = context.opaque_struct_type("Int");
         let cl_bool_ty = context.opaque_struct_type("Bool");
 
+        // Struct Types for Native Classes
+
         // class_id
         let object_attrs = &[i32_ty.into()];
         cl_object_ty.set_body(object_attrs, false);
@@ -80,7 +82,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         cl_int_ty.set_body(int_attrs, false);
 
         // class_id, value
-        let bool_attrs = &[i32_ty.into(), i32_ty.into()];
+        let bool_attrs = &[i32_ty.into(), bool_ty.into()];
         cl_bool_ty.set_body(bool_attrs, false);
 
         // class_id, ptr to in for length, str content
@@ -233,6 +235,12 @@ class Main {
     fn test_codegen_simple_out_string() {
         let code = r#"class Main{main():Object{(new IO).out_string("hello")};};"#;
         compile_run_assert_output_eq(code, "hello");
+    }
+
+    #[test]
+    fn test_codegen_simple_out_int() {
+        let code = r#"class Main{main():Object{(new IO).out_int(42)};};"#;
+        compile_run_assert_output_eq(code, "42");
     }
 
     //#[test]

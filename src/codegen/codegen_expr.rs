@@ -362,10 +362,8 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 phi_basic.into_pointer_value()
             }
-            ExprData::TypCase { expr, cases: _ } => {
-                let _val_struct_ptr = self.codegen(expr);
-
-                todo!()
+            ExprData::TypCase { expr, cases } => {
+                self.code_typecase(expr, cases)
             }
             ExprData::Let {
                 id,

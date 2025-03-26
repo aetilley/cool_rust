@@ -216,6 +216,15 @@ impl<'ctx> CodeGenManager<'ctx> {
             .add_function("puts", fn_type, Some(Linkage::External));
     }
 
+    fn declare_printf(&self) {
+        // Delaration below is for out_int.
+        let fn_type = self
+            .i32_ty
+            .fn_type(&[self.ptr_ty.into()], true);
+        self.module
+            .add_function("printf", fn_type, Some(Linkage::External));
+    }
+
     fn declare_strlen(&self) {
         let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], false);
         self.module
@@ -247,6 +256,40 @@ impl<'ctx> CodeGenManager<'ctx> {
             self.load_pointer_field_from_pointer_at_struct(self_ptr, STRING, STRING_LEN_IND);
 
         self.builder.build_return(Some(&value)).unwrap();
+        fn_val.verify(false);
+    }
+
+    fn code_io_out_int(&mut self) {
+        let fn_name = method_ref(&sym(IO), &sym(OUT_INT));
+        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
+
+        let format_string_array =
+            self.code_array_value_from_sym(&sym("%d\00"));
+        let format_string_ptr = self
+            .builder
+            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
+            .unwrap();
+
+        self.builder
+            .build_store(format_string_ptr, format_string_array)
+            .unwrap();
+
+        let arg = fn_val.get_last_param().unwrap().into_pointer_value();
+        // Get String array from second field of *String
+        let to_print_field =
+            self.load_int_field_from_pointer_at_struct(arg, INT, self.i32_ty, INT_VAL_IND);
+
+        let printf = self.module.get_function("printf").unwrap();
+        let _call = self.builder
+            .build_call(
+                printf,
+                &[format_string_ptr.into(), to_print_field.into()],
+                "call_printf",
+            )
+            .unwrap();
+
+        let body_val = self.codegen(&Expr::new(&sym("Object")));
+        self.builder.build_return(Some(&body_val)).unwrap();
         fn_val.verify(false);
     }
 
@@ -360,11 +403,18 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.declare_gets();
         self.declare_strcmp();
         self.declare_strlen();
+        self.declare_printf();
         self.code_io_out_string();
+        self.code_io_out_int();
         self.code_io_in_string();
         self.code_string_length();
         // TEMPORARY!  Just so we can run our program before all natives are really implemented.
-        let skip_list = vec![sym("out_string"), sym("in_string"), sym("length")];
+        let skip_list = vec![
+            sym("out_string"),
+            sym("out_int"),
+            sym("in_string"),
+            sym("length"),
+        ];
         self.code_native_method_stubs(skip_list);
     }
 

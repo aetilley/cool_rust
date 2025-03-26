@@ -1,6 +1,7 @@
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
+use crate::ast::{Expr, Cases};
 use inkwell::types::{ArrayType, IntType};
 use inkwell::values::PointerValue;
 use inkwell::values::{ArrayValue, IntValue};
@@ -269,5 +270,10 @@ impl<'ctx> CodeGenManager<'ctx> {
         let phi_basic = phi.as_basic_value();
 
         phi_basic.into_pointer_value()
+    }
+
+    pub fn code_typecase(&self, _expr: &Expr, _cases: &Cases) -> PointerValue<'ctx> {
+
+        todo!()
     }
 }
