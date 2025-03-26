@@ -1,7 +1,7 @@
+use crate::ast::{Cases, Expr};
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
-use crate::ast::{Expr, Cases};
 use inkwell::types::{ArrayType, IntType};
 use inkwell::values::PointerValue;
 use inkwell::values::{ArrayValue, IntValue};
@@ -273,7 +273,6 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     pub fn code_typecase(&self, _expr: &Expr, _cases: &Cases) -> PointerValue<'ctx> {
-
         todo!()
     }
 }

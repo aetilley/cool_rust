@@ -210,17 +210,9 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // External functions.
 
-    fn declare_puts(&self) {
-        let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], false);
-        self.module
-            .add_function("puts", fn_type, Some(Linkage::External));
-    }
-
     fn declare_printf(&self) {
         // Delaration below is for out_int.
-        let fn_type = self
-            .i32_ty
-            .fn_type(&[self.ptr_ty.into()], true);
+        let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], true);
         self.module
             .add_function("printf", fn_type, Some(Linkage::External));
     }
@@ -263,8 +255,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         let fn_name = method_ref(&sym(IO), &sym(OUT_INT));
         let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
-        let format_string_array =
-            self.code_array_value_from_sym(&sym("%d\00"));
+        let format_string_array = self.code_array_value_from_sym(&sym("%d\n\0"));
         let format_string_ptr = self
             .builder
             .build_alloca(format_string_array.get_type(), "ptr to fmt string")
@@ -280,7 +271,8 @@ impl<'ctx> CodeGenManager<'ctx> {
             self.load_int_field_from_pointer_at_struct(arg, INT, self.i32_ty, INT_VAL_IND);
 
         let printf = self.module.get_function("printf").unwrap();
-        let _call = self.builder
+        let _call = self
+            .builder
             .build_call(
                 printf,
                 &[format_string_ptr.into(), to_print_field.into()],
@@ -304,9 +296,25 @@ impl<'ctx> CodeGenManager<'ctx> {
             .build_struct_gep(self.cl_string_ty, arg, STRING_CONTENT_IND, "gep")
             .unwrap();
 
-        let puts_fn = self.module.get_function("puts").unwrap();
+        let format_string_array = self.code_array_value_from_sym(&sym("%s\n\0"));
+
+        let format_string_ptr = self
+            .builder
+            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
+            .unwrap();
+
         self.builder
-            .build_call(puts_fn, &[to_print_field.into()], "call_puts")
+            .build_store(format_string_ptr, format_string_array)
+            .unwrap();
+
+        let printf = self.module.get_function("printf").unwrap();
+        let _call = self
+            .builder
+            .build_call(
+                printf,
+                &[format_string_ptr.into(), to_print_field.into()],
+                "call_printf",
+            )
             .unwrap();
 
         let body_val = self.codegen(&Expr::new(&sym("Object")));
@@ -326,8 +334,19 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap();
 
         // Warning message
+        let format_string_array = self.code_array_value_from_sym(&sym("%s\n\0"));
+
+        let format_string_ptr = self
+            .builder
+            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
+            .unwrap();
+
+        self.builder
+            .build_store(format_string_ptr, format_string_array)
+            .unwrap();
+
         let warning_array = self.code_array_value_from_sym(&sym(&format!(
-            "Please enter no more than {} characters.",
+            "Please enter no more than {} characters.\n\0",
             MAX_IN_STRING_LEN
         )));
         let warning_ptr = self
@@ -337,9 +356,15 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder
             .build_store(warning_ptr, warning_array)
             .unwrap();
-        let puts_fn = self.module.get_function("puts").unwrap();
-        self.builder
-            .build_call(puts_fn, &[warning_ptr.into()], "call_puts")
+
+        let printf = self.module.get_function("printf").unwrap();
+        let _call = self
+            .builder
+            .build_call(
+                printf,
+                &[format_string_ptr.into(), warning_ptr.into()],
+                "call_printf",
+            )
             .unwrap();
 
         // Call gets
@@ -399,7 +424,6 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_native_method_bodies(&mut self) {
-        self.declare_puts();
         self.declare_gets();
         self.declare_strcmp();
         self.declare_strlen();

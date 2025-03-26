@@ -362,9 +362,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 phi_basic.into_pointer_value()
             }
-            ExprData::TypCase { expr, cases } => {
-                self.code_typecase(expr, cases)
-            }
+            ExprData::TypCase { expr, cases } => self.code_typecase(expr, cases),
             ExprData::Let {
                 id,
                 typ: _,
