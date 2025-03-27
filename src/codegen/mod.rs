@@ -200,6 +200,18 @@ mod codegen_tests {
     }
 
     #[test]
+    fn test_codegen_simple_out_string() {
+        let code = r#"class Main{main():Object{(new IO).out_string("hello")};};"#;
+        compile_run_assert_output_eq(code, "hello");
+    }
+
+    #[test]
+    fn test_codegen_simple_out_int() {
+        let code = r#"class Main{main():Object{(new IO).out_int(42)};};"#;
+        compile_run_assert_output_eq(code, "42");
+    }
+
+    #[test]
     fn test_codegen_assign_attr() {
         let code = r#"
 class Main {
@@ -236,18 +248,6 @@ class Main {
         compile_run_assert_output_eq(code, "hello\ngoodbye");
     }
 
-    #[test]
-    fn test_codegen_simple_out_string() {
-        let code = r#"class Main{main():Object{(new IO).out_string("hello")};};"#;
-        compile_run_assert_output_eq(code, "hello");
-    }
-
-    #[test]
-    fn test_codegen_simple_out_int() {
-        let code = r#"class Main{main():Object{(new IO).out_int(42)};};"#;
-        compile_run_assert_output_eq(code, "42");
-    }
-
     //#[test]
     // How to do this?
     fn test_codegen_simple_in_string() {
@@ -260,12 +260,12 @@ class Main {
 class Main {
     io: IO <- (new IO);
     main() : Object {{
-          if "hello".length() = 5 then io.out_string("YES") else io.out_string("NO") fi;
-          if "hell".length() = 5 then io.out_string("YES") else io.out_string("NO") fi;
+          io.out_int("hello".length());
+          io.out_int("hell".length());
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "YES\nNO");
+        compile_run_assert_output_eq(code, "5\n4");
     }
 
     #[test]
@@ -312,11 +312,11 @@ class Main {
         let code = r#"
 class Main {
     main() : Object {
-        let a: Int <- 2, b: Int <- 3 in (new IO).out_string(if a + b = 5 then "YES" else "NO" fi)
+        let a: Int <- 2, b: Int <- 3 in (new IO).out_int(a + b)
     };
 };
 "#;
-        compile_run_assert_output_eq(code, "YES");
+        compile_run_assert_output_eq(code, "5");
     }
 
     #[test]
@@ -325,15 +325,15 @@ class Main {
 class Main {
 
     foo(a: Int) : Object {{
-        let a: Int <- 2 in (new IO).out_string(if a = 2 then "TWO" else "NOT TWO" fi);
-        (new IO).out_string(if a = 1 then "ONE" else "NOT ONE" fi);
+        let a: Int <- 2 in (new IO).out_int(a);
+        (new IO).out_int(a);
     }};
     main() : Object {
         foo(1) 
     };
 };
 "#;
-        compile_run_assert_output_eq(code, "TWO\nONE");
+        compile_run_assert_output_eq(code, "2\n1");
     }
 
     #[test]
@@ -375,16 +375,15 @@ class Main {
         let code = r#"
 class Main {
     a: Int <- 42; 
-    io: IO <- new IO; 
-    f(x: Int) : Bool {x = 42};
+    f(x: Int) : Int {x + 1};
     main() : Object {
-      if f(a) then io.out_string("YES") else io.out_string("NO") fi
+        (new IO).out_int(f(a))
     };  
 };
 
 "#;
 
-        compile_run_assert_output_eq(code, "YES");
+        compile_run_assert_output_eq(code, "43");
     }
 
     #[test]
@@ -498,12 +497,12 @@ class Main {
 class Main {
     io: IO <- new IO; 
     main() : Object {{
-          if ~42 + 1 = 0-42 then io.out_string("YES") else io.out_string("NO") fi;
-          if ~0 + 1 = 0 then io.out_string("YES") else io.out_string("NO") fi;
+          io.out_int(~42 + 1);
+          io.out_int(~0 + 1);
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "YES\nYES");
+        compile_run_assert_output_eq(code, "-42\n0");
     }
 
     #[test]
@@ -546,17 +545,17 @@ class Main {
 class Main {
     io: IO <- new IO; 
     main() : Object {{
-          if  2 + 3 = 5 then io.out_string("YES") else io.out_string("NO") fi;
-          if  3 - 1 = 2 then io.out_string("YES") else io.out_string("NO") fi;
-          if  2 - 3 = 0 - 1 then io.out_string("YES") else io.out_string("NO") fi;
-          if  2 * 3 = 6 then io.out_string("YES") else io.out_string("NO") fi;
-          if  6 / 2 = 3 then io.out_string("YES") else io.out_string("NO") fi;
-          if  6 / (0 - 2) = (0 - 3) then io.out_string("YES") else io.out_string("NO") fi;
-          if  6 / 4 = 1 then io.out_string("YES") else io.out_string("NO") fi;
+          io.out_int(2 + 3);
+          io.out_int(3 - 1);
+          io.out_int(2 - 3);
+          io.out_int(2 * 3);
+          io.out_int(6 / 2);
+          io.out_int(6 / (0 - 2));
+          io.out_int(6 / 4);
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "YES\nYES\nYES\nYES\nYES\nYES\n");
+        compile_run_assert_output_eq(code, "5\n2\n-1\n6\n3\n-3\n1");
     }
 
     #[test]
