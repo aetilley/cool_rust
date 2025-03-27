@@ -1,13 +1,41 @@
-use crate::ast::Cases;
+use crate::ast::{Cases, Formal};
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
-use inkwell::types::{ArrayType, BasicTypeEnum, IntType};
+use inkwell::basic_block::BasicBlock;
+use inkwell::types::{ArrayType, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType, IntType};
 use inkwell::values::{ArrayValue, IntValue};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::IntPredicate;
 
 impl<'ctx> CodeGenManager<'ctx> {
+    pub fn get_function_type_from_signature(
+        &self,
+        parameters: &[Formal],
+        _return_type: &Sym,
+    ) -> FunctionType<'ctx> {
+        // Everything is a pointer.
+        let args_types = std::iter::repeat(self.ptr_ty)
+            .take(parameters.len())
+            .map(|f| f.into())
+            .collect::<Vec<BasicMetadataTypeEnum>>();
+
+        let fn_type = self.ptr_ty.fn_type(&args_types[..], false);
+        fn_type
+    }
+
+    pub fn code_function_entry(&self, fn_name: &str) -> (FunctionValue<'ctx>, BasicBlock<'ctx>) {
+        // For predeclared functions only!
+        let fn_val = self
+            .module
+            .get_function(fn_name)
+            .unwrap_or_else(|| panic!("No function declaration found for {}", fn_name));
+        let block_name = &format!("{}_entry", fn_name);
+        let entry_block = self.context.append_basic_block(fn_val, block_name);
+        self.builder.position_at_end(entry_block);
+        (fn_val, entry_block)
+    }
+
     pub fn code_array_value_from_sym(&self, s: &Sym) -> ArrayValue<'ctx> {
         let array_values: Vec<IntValue> = s
             .as_bytes()

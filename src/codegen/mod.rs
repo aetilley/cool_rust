@@ -1,3 +1,4 @@
+mod codegen_class_inits;
 mod codegen_constants;
 mod codegen_expr;
 mod codegen_functions;
