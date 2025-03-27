@@ -271,6 +271,20 @@ class Main {
     }
 
     #[test]
+    fn test_codegen_string_substr() {
+        let code = r#"
+class Main {
+    io: IO <- new IO; 
+  main() : Object {{
+      io.out_string("hello world".substr(2,3));
+    }}; 
+};
+
+"#;
+        compile_run_assert_output_eq(code, "llo");
+    }
+
+    #[test]
     fn test_codegen_dynamic_disp() {
         let code = r#"
     class Apple {
