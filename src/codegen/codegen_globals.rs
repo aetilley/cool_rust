@@ -3,6 +3,7 @@ use crate::codegen::CodeGenManager;
 use crate::symbol::{dump_ints, dump_strings, sym, Sym};
 
 use inkwell::types::{BasicTypeEnum, VectorType};
+use inkwell::values::BasicValueEnum;
 use inkwell::values::PointerValue;
 use inkwell::values::{ArrayValue, IntValue};
 
@@ -135,6 +136,34 @@ impl CodeGenManager<'_> {
     }
 }
 
+// Parent table
+impl CodeGenManager<'_> {
+    pub fn code_type_name_vector(&mut self) {
+        // We make a global array whose ith element is the name of class with class_id i.
+        let mut initializer_fields: Vec<BasicValueEnum> = vec![];
+
+        let class_id_order: Vec<Sym> = self.ct.class_id_order.clone();
+        for cls in class_id_order.iter() {
+            let ptr = self
+                .module
+                .get_global(&global_string_ref(cls))
+                .unwrap()
+                .as_pointer_value();
+            initializer_fields.push(ptr.into());
+        }
+
+        let type_name_vec = VectorType::const_vector(&initializer_fields[..]);
+
+        let type_name_vec_global = self.module.add_global(
+            type_name_vec.get_type(),
+            Some(self.aspace),
+            TYPE_NAME_VECTOR,
+        );
+
+        type_name_vec_global.set_initializer(&type_name_vec);
+    }
+}
+
 // Static constants
 impl CodeGenManager<'_> {
     pub fn register_globals_for_boolean(&mut self, b: bool) {
@@ -177,7 +206,11 @@ impl CodeGenManager<'_> {
     }
 
     // Must do this after globals for ints.
+
     pub fn register_global_for_string(&mut self, s: &Sym) {
+        let len_str = &format!("{}", s.len());
+        self.register_global_for_int(&sym(len_str));
+
         // Content
         let str_content = self.code_array_value_from_sym(s);
         // Len as struct Int
@@ -213,8 +246,14 @@ impl CodeGenManager<'_> {
         }
 
         for s in dump_strings().iter() {
-            let len_str = &format!("{}", s.len());
-            self.register_global_for_int(&sym(len_str));
+            self.register_global_for_string(s);
+        }
+        let native_classes = self.ct.native_classes.clone();
+        for s in native_classes.iter() {
+            self.register_global_for_string(s);
+        }
+        let program_classes = self.ct.program_classes.clone();
+        for s in program_classes.iter() {
             self.register_global_for_string(s);
         }
 

@@ -21,6 +21,7 @@ pub const OBJECT_PREFIX_SIZE: u32 = 1;
 
 pub const VTABLE_MASTER_VECTOR: &str = "vtable_master_vector";
 pub const PARENT_VECTOR: &str = "parent_vector";
+pub const TYPE_NAME_VECTOR: &str = "type_name_vector";
 
 pub const INT_VAL_IND: u32 = 1;
 pub const BOOL_VAL_IND: u32 = 1;
@@ -59,8 +60,6 @@ pub fn vtable_ref(cls_name: &Sym) -> String {
 pub fn init_ref(cls: &Sym) -> String {
     format!("{}_init", cls)
 }
-
-pub const GLOBAL_ZERO: &str = "global_zero";
 
 pub fn global_bool_ref(b: bool) -> String {
     format!("bool_{}", b)

@@ -45,30 +45,30 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.i8_ty.const_array(&array_values[..])
     }
 
-    //pub fn code_new_string(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-    //    let new_ptr = self.code_new_and_init(&sym("String"));
+    pub fn code_new_string_from_array(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
+        let new_ptr = self.code_new_and_init(&sym("String"));
 
-    //    let pointee_ty = self.context.get_struct_type("String").unwrap();
-    //    // set Length
-    //    let value = self
-    //        .context
-    //        .i32_type()
-    //        .const_int(str_array.get_type().len() as u64, false);
-    //    let field = self
-    //        .builder
-    //        .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
-    //        .unwrap();
-    //    self.builder.build_store(field, value).unwrap();
+        let pointee_ty = self.context.get_struct_type("String").unwrap();
+        // set Length
+        let value = self
+            .context
+            .i32_type()
+            .const_int(str_array.get_type().len() as u64, false);
+        let field = self
+            .builder
+            .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
+            .unwrap();
+        self.builder.build_store(field, value).unwrap();
 
-    //    // set array
-    //    let field = self
-    //        .builder
-    //        .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
-    //        .unwrap();
-    //    self.builder.build_store(field, str_array).unwrap();
+        // set array
+        let field = self
+            .builder
+            .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
+            .unwrap();
+        self.builder.build_store(field, str_array).unwrap();
 
-    //    new_ptr
-    //}
+        new_ptr
+    }
 
     pub fn code_new_string_from_ptr(
         &self,

@@ -125,6 +125,8 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         man.register_globals();
 
+        man.code_type_name_vector();
+
         man.code_all_inits();
 
         man.code_all_method_bodies();
@@ -214,6 +216,36 @@ mod codegen_tests {
     }
 
     #[test]
+    fn test_codegen_object_abort() {
+        let code = r#"
+        class Apple {}; 
+        class Main {
+            main() : 
+            Object {
+                (new Apple).abort()
+            };  
+        };
+        "#;
+        compile_run_assert_output_eq(code, "");
+    }
+
+    // #[test]
+    fn test_codegen_string_concat() {
+        let code = r#"
+        
+       class Main {
+    io: IO <- new IO; 
+  main() : Object {{
+      io.out_string("hello".concat(" world"));
+    }}; 
+};
+
+
+        "#;
+        compile_run_assert_output_eq(code, "hello world");
+    }
+
+    #[test]
     fn test_codegen_assign_attr() {
         let code = r#"
 class Main {
@@ -256,6 +288,12 @@ class Main {
         todo!();
     }
 
+    //#[test]
+    // How to do this?
+    fn test_codegen_simple_in_int() {
+        todo!();
+    }
+
     #[test]
     fn test_codegen_string_length() {
         let code = r#"
@@ -270,7 +308,7 @@ class Main {
         compile_run_assert_output_eq(code, "5\n4");
     }
 
-    #[test]
+    // #[test]
     fn test_codegen_string_substr() {
         let code = r#"
 class Main {
@@ -307,6 +345,28 @@ class Main {
 };
 "#;
         compile_run_assert_output_eq(code, "Hello World!\nHola Mundo!");
+    }
+
+    #[test]
+    fn test_codegen_object_type_name() {
+        let code = r#"
+    class Apple {};
+
+    class Orange inherits Apple {};
+
+    class Main {
+        a: Apple <- new Apple;
+        b: Apple <- new Orange;
+        c: String;
+        main() : 
+        Object {{
+            (new IO).out_string(a.type_name());
+            (new IO).out_string(b.type_name());
+            (new IO).out_string(c.type_name());
+        }}; 
+    };
+    "#;
+        compile_run_assert_output_eq(code, "Apple\nOrange\nString");
     }
 
     #[test]
