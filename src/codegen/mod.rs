@@ -574,4 +574,70 @@ class Main {
 "#;
         compile_run_assert_output_eq(code, "44");
     }
+
+    #[test]
+    fn test_codegen_typecase_complex() {
+        let code = r#"
+        class A{};
+        class A1 inherits A{};
+        class A2 inherits A{};
+        class A11 inherits A1{};
+        class A12 inherits A1{};
+        class A121 inherits A12{};
+        class A122 inherits A12{};
+        class A21 inherits A2{};
+        class A22 inherits A2{};
+
+class Main {
+    io: IO <- new IO; 
+    a : A <- new A122;
+    main() : Object {
+        case a of 
+        a : A1 => io.out_string("A1.");
+        a : A2 => io.out_string("A2.");
+        a : A11 => io.out_string("A11.");
+        a : A12 => io.out_string("A12.");
+        a : A121 => io.out_string("A121.");
+        (* a : A122 => io.out_string("A122."); (no case for A122) *)
+        a : A21 => io.out_string("A21.");
+        a : A22 => io.out_string("A22.");
+        esac
+    };
+};
+"#;
+        compile_run_assert_output_eq(code, "A12.");
+    }
+
+    #[test]
+    fn test_codegen_typecase_complex_2() {
+        let code = r#"
+        class A{};
+        class A1 inherits A{};
+        class A2 inherits A{};
+        class A11 inherits A1{};
+        class A12 inherits A1{};
+        class A121 inherits A12{};
+        class A122 inherits A12{};
+        class A21 inherits A2{};
+        class A22 inherits A2{};
+
+class Main {
+    io: IO <- new IO; 
+    a : A <- new A122;
+    main() : Object {
+        case a of 
+        a : A1 => io.out_string("A1.");
+        a : A2 => io.out_string("A2.");
+        a : A11 => io.out_string("A11.");
+        (* a : A12 => io.out_string("A12."); (no case for A12) *)
+        a : A121 => io.out_string("A121.");
+        (* a : A122 => io.out_string("A122."); (no case for A122) *)
+        a : A21 => io.out_string("A21.");
+        a : A22 => io.out_string("A22.");
+        esac
+    };
+};
+"#;
+        compile_run_assert_output_eq(code, "A1.");
+    }
 }
