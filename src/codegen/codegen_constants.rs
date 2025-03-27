@@ -35,10 +35,16 @@ pub const MAX_IN_STRING_LEN: u64 = 100;
 pub const OUT_STRING: &str = "out_string";
 pub const IN_STRING: &str = "in_string";
 pub const OUT_INT: &str = "out_int";
+pub const IN_INT: &str = "in_int";
 pub const IS_SUBTYPE: &str = "is_subtype";
 pub const MIN_BOUND_FINDER: &str = "min_bound_finder";
 pub const TYPE_IS_MEMBER: &str = "type_is_member";
 pub const CASE_SELECTOR: &str = "case_selector";
+pub const CONCAT: &str = "concat";
+pub const SUBSTRING: &str = "substr";
+pub const ABORT: &str = "abort";
+pub const COPY: &str = "copy";
+pub const TYPE_NAME: &str = "type_name";
 
 pub const ENTRY: &str = "main";
 

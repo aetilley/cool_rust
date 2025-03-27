@@ -529,8 +529,10 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .into_pointer_value();
 
                 // Compile the arguments.
-                let ((parameters, return_type), _) =
-                    self.ct.get_method(static_type, method_name).unwrap();
+                let ((parameters, return_type), _) = self
+                    .ct
+                    .get_method_dynamic(static_type, method_name)
+                    .unwrap();
 
                 let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
                 all_parameters.extend(parameters.to_owned());

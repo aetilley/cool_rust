@@ -1,7 +1,6 @@
 use crate::ast::{Expr, ExprData, Formal};
 use crate::symbol::{sym, Sym};
 use inkwell::basic_block::BasicBlock;
-use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, FunctionType};
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
@@ -215,183 +214,10 @@ impl<'ctx> CodeGenManager<'ctx> {
             self.code_init_for_class(cls.to_owned());
         }
     }
+}
 
-    // External functions.
-
-    fn declare_printf(&self) {
-        let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], true);
-        self.module
-            .add_function("printf", fn_type, Some(Linkage::External));
-    }
-
-    fn declare_strlen(&self) {
-        let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], false);
-        self.module
-            .add_function("strlen", fn_type, Some(Linkage::External));
-    }
-
-    fn declare_strcmp(&self) {
-        let fn_type = self
-            .i32_ty
-            .fn_type(&[self.ptr_ty.into(), self.ptr_ty.into()], false);
-        self.module
-            .add_function("strcmp", fn_type, Some(Linkage::External));
-    }
-
-    fn declare_gets(&self) {
-        let fn_type = self.ptr_ty.fn_type(&[self.ptr_ty.into()], false);
-        self.module
-            .add_function("gets", fn_type, Some(Linkage::External));
-    }
-
-    // Native Methods
-
-    fn code_string_length(&self) {
-        let fn_name = method_ref(&sym(STRING), &sym(LENGTH));
-        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
-        let self_ptr = fn_val.get_first_param().unwrap().into_pointer_value();
-
-        let value =
-            self.load_pointer_field_from_pointer_at_struct(self_ptr, STRING, STRING_LEN_IND);
-
-        self.builder.build_return(Some(&value)).unwrap();
-        fn_val.verify(false);
-    }
-
-    fn code_io_out_int(&mut self) {
-        let fn_name = method_ref(&sym(IO), &sym(OUT_INT));
-        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
-
-        let format_string_array = self.code_array_value_from_sym(&sym("%d\n\0"));
-        let format_string_ptr = self
-            .builder
-            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
-            .unwrap();
-
-        self.builder
-            .build_store(format_string_ptr, format_string_array)
-            .unwrap();
-
-        let arg = fn_val.get_last_param().unwrap().into_pointer_value();
-        // Get String array from second field of *String
-        let to_print_field =
-            self.load_int_field_from_pointer_at_struct(arg, INT, self.i32_ty, INT_VAL_IND);
-
-        let printf = self.module.get_function("printf").unwrap();
-        let _call = self
-            .builder
-            .build_call(
-                printf,
-                &[format_string_ptr.into(), to_print_field.into()],
-                "call_printf",
-            )
-            .unwrap();
-
-        let body_val = self.codegen(&Expr::new(&sym("Object")));
-        self.builder.build_return(Some(&body_val)).unwrap();
-        fn_val.verify(false);
-    }
-
-    fn code_io_out_string(&mut self) {
-        let fn_name = method_ref(&sym(IO), &sym(OUT_STRING));
-        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
-
-        let arg = fn_val.get_last_param().unwrap().into_pointer_value();
-        // Get String array from second field of *String
-        let to_print_field = self
-            .builder
-            .build_struct_gep(self.cl_string_ty, arg, STRING_CONTENT_IND, "gep")
-            .unwrap();
-
-        let format_string_array = self.code_array_value_from_sym(&sym("%s\n\0"));
-
-        let format_string_ptr = self
-            .builder
-            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
-            .unwrap();
-
-        self.builder
-            .build_store(format_string_ptr, format_string_array)
-            .unwrap();
-
-        let printf = self.module.get_function("printf").unwrap();
-        let _call = self
-            .builder
-            .build_call(
-                printf,
-                &[format_string_ptr.into(), to_print_field.into()],
-                "call_printf",
-            )
-            .unwrap();
-
-        let body_val = self.codegen(&Expr::new(&sym("Object")));
-        self.builder.build_return(Some(&body_val)).unwrap();
-        fn_val.verify(false);
-    }
-
-    fn code_io_in_string(&self) {
-        let fn_name = method_ref(&sym(IO), &sym(IN_STRING));
-        let (_fn_val, _entry_block) = self.code_function_entry(&fn_name);
-
-        let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
-        let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
-        let dest_ptr = self
-            .builder
-            .build_array_malloc(self.i8_ty, buff_size, "buffer_ptr")
-            .unwrap();
-
-        // Warning message
-        let format_string_array = self.code_array_value_from_sym(&sym("%s\n\0"));
-
-        let format_string_ptr = self
-            .builder
-            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
-            .unwrap();
-
-        self.builder
-            .build_store(format_string_ptr, format_string_array)
-            .unwrap();
-
-        let warning_array = self.code_array_value_from_sym(&sym(&format!(
-            "Please enter no more than {} characters.\n\0",
-            MAX_IN_STRING_LEN
-        )));
-        let warning_ptr = self
-            .builder
-            .build_alloca(warning_array.get_type(), "ptr to warning")
-            .unwrap();
-        self.builder
-            .build_store(warning_ptr, warning_array)
-            .unwrap();
-
-        let printf = self.module.get_function("printf").unwrap();
-        let _call = self
-            .builder
-            .build_call(
-                printf,
-                &[format_string_ptr.into(), warning_ptr.into()],
-                "call_printf",
-            )
-            .unwrap();
-
-        // Call gets
-        let _ = self
-            .builder
-            .build_call(
-                self.module.get_function("gets").unwrap(),
-                &[dest_ptr.into()],
-                "_",
-            )
-            .unwrap()
-            .try_as_basic_value()
-            .left()
-            .unwrap();
-
-        let result = self.code_new_string_from_ptr(dest_ptr, array_type);
-
-        self.builder.build_return(Some(&result)).unwrap();
-    }
-
+// Method bodies
+impl CodeGenManager<'_> {
     fn code_method_body(
         &mut self,
         cls: &Sym,
@@ -428,25 +254,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         fn_val.verify(true);
     }
 
-    fn code_native_method_bodies(&mut self) {
-        self.declare_gets();
-        self.declare_strcmp();
-        self.declare_strlen();
-        self.declare_printf();
-        self.code_io_out_string();
-        self.code_io_out_int();
-        self.code_io_in_string();
-        self.code_string_length();
-        // TEMPORARY!  Just so we can run our program before all natives are really implemented.
-        let skip_list = vec![
-            sym("out_string"),
-            sym("out_int"),
-            sym("in_string"),
-            sym("length"),
-        ];
-        self.code_native_method_stubs(skip_list);
-    }
-
     fn code_method_bodies_for_class(&mut self, cls: &Sym) {
         let methods = self.ct.class_methods.get(cls).unwrap().clone();
         self.current_class = Some(cls.to_owned());
@@ -454,19 +261,6 @@ impl<'ctx> CodeGenManager<'ctx> {
             self.code_method_body(cls, method, parameters, return_type, body);
         }
         self.current_class = None;
-    }
-
-    fn code_native_method_stubs(&mut self, skip_list: Vec<Sym>) {
-        let native_classes = self.ct.native_classes.clone();
-        let stub = &Expr::no_expr();
-        for cls in native_classes {
-            let methods = self.ct.class_methods.get(&cls).unwrap().clone();
-            for (method_name, ((parameters, return_type), _)) in methods.iter() {
-                if !skip_list.contains(method_name) {
-                    self.code_method_body(&cls, method_name, parameters, return_type, stub);
-                }
-            }
-        }
     }
 
     fn code_program_method_bodies(&mut self) {

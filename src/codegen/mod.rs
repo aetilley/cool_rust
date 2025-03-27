@@ -2,6 +2,7 @@ mod codegen_constants;
 mod codegen_expr;
 mod codegen_functions;
 mod codegen_globals;
+mod codegen_native_methods;
 mod codegen_utils;
 
 use crate::ast::Program;
