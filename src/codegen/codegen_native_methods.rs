@@ -32,6 +32,10 @@ impl CodeGenManager<'_> {
             "memcpy" => self.context.void_type().fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
             // void abort()
             "abort" => self.context.void_type().fn_type(&[], false),
+            // void *malloc( size_t size );
+            "malloc" => self.context.void_type().fn_type(&[self.i32_ty.into()], false),
+
+
         };
 
         for (fn_name, fn_type) in externals_types.iter() {
@@ -382,42 +386,52 @@ impl CodeGenManager<'_> {
 
     fn code_object_copy(&self) {
         let fn_name = method_ref(&sym(OBJECT), &sym(COPY));
-        let (_fn_val, _entry_block) = self.code_function_entry(&fn_name);
+        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
-        // Warning message
-        let format_string_array = self.code_array_value_from_sym(&sym("%s\n\0"));
+        let self_ptr = fn_val.get_first_param().unwrap().into_pointer_value();
 
-        let format_string_ptr = self
+        // Get size of self.
+
+        let size_table_ty = self
+            .i32_ty
+            .vec_type(self.ct.class_id_order.len().try_into().unwrap());
+        let size_table_ptr = self
+            .module
+            .get_global(STRUCT_SIZE_TABLE)
+            .unwrap()
+            .as_pointer_value();
+        let size_table = self
             .builder
-            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
+            .build_load(size_table_ty, size_table_ptr, "size table")
             .unwrap();
 
-        self.builder
-            .build_store(format_string_ptr, format_string_array)
-            .unwrap();
+        let class_id =
+            self.load_int_field_from_pointer_at_struct(self_ptr, OBJECT, self.i32_ty, CLASS_ID_IND);
 
-        let warning_array =
-            self.code_array_value_from_sym(&sym(&format!("{} is not yet implemented\0", fn_name)));
-        let warning_ptr = self
+        let size = self
             .builder
-            .build_alloca(warning_array.get_type(), "ptr to warning")
-            .unwrap();
-        self.builder
-            .build_store(warning_ptr, warning_array)
-            .unwrap();
+            .build_extract_element(size_table.into_vector_value(), class_id, "struct_size")
+            .unwrap()
+            .into_int_value();
 
-        let printf = self.module.get_function("printf").unwrap();
-        let _call = self
+        let new_space = self
             .builder
             .build_call(
-                printf,
-                &[format_string_ptr.into(), warning_ptr.into()],
-                "call_printf",
+                self.module.get_function("malloc").unwrap(),
+                &[size.into()],
+                "malloc",
             )
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+
+        self.builder
+            .build_memcpy(new_space, 8, self_ptr, 8, size)
             .unwrap();
 
-        let result = self.ptr_ty.const_null();
-        self.builder.build_return(Some(&result)).unwrap();
+        self.builder.build_return(Some(&self_ptr)).unwrap();
     }
 
     fn code_object_type_name(&self) {

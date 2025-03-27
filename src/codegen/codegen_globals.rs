@@ -111,8 +111,8 @@ impl<'ctx> CodeGenManager<'ctx> {
 // Parent table
 impl CodeGenManager<'_> {
     pub fn code_parent_vector(&mut self) {
-        // We make a global array whose ith element is a pointer to the vtable
-        // for the class with class_id i.
+        // We make a global array whose ith element is the class_id of the parent
+        // of the class with class_id i.
         let mut initializer_fields: Vec<IntValue> = vec![];
 
         let class_id_order: Vec<Sym> = self.ct.class_id_order.clone();
@@ -133,6 +133,28 @@ impl CodeGenManager<'_> {
                 .add_global(initializer.get_type(), Some(self.aspace), PARENT_VECTOR);
 
         parent_vector_global.set_initializer(&initializer);
+    }
+}
+
+// Parent table
+impl CodeGenManager<'_> {
+    pub fn code_struct_size_table(&mut self) {
+        // We make a global array whose ith element is the size of the class with class_id i.
+        let mut initializer_fields: Vec<IntValue> = vec![];
+
+        let class_id_order: Vec<Sym> = self.ct.class_id_order.clone();
+        for cls in class_id_order.iter() {
+            let size = self.module.get_struct_type(cls).unwrap().size_of().unwrap();
+            initializer_fields.push(size);
+        }
+
+        let initializer = VectorType::const_vector(&initializer_fields[..]);
+
+        let size_vector_global =
+            self.module
+                .add_global(initializer.get_type(), Some(self.aspace), STRUCT_SIZE_TABLE);
+
+        size_vector_global.set_initializer(&initializer);
     }
 }
 

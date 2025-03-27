@@ -22,6 +22,7 @@ pub const OBJECT_PREFIX_SIZE: u32 = 1;
 pub const VTABLE_MASTER_VECTOR: &str = "vtable_master_vector";
 pub const PARENT_VECTOR: &str = "parent_vector";
 pub const TYPE_NAME_VECTOR: &str = "type_name_vector";
+pub const STRUCT_SIZE_TABLE: &str = "struct_size_table";
 
 pub const INT_VAL_IND: u32 = 1;
 pub const BOOL_VAL_IND: u32 = 1;

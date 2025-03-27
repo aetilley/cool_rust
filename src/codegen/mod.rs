@@ -123,6 +123,8 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         man.code_parent_vector();
 
+        man.code_struct_size_table();
+
         man.register_globals();
 
         man.code_type_name_vector();
@@ -201,6 +203,22 @@ mod codegen_tests {
     fn test_codegen_simplest() {
         let code = "class Main{main():Object{0};};";
         compile_run_assert_output_eq(code, "");
+    }
+
+    #[test]
+    fn test_codegen_object_copy() {
+        let code = r#"
+class Main {
+    a: String;
+    b: String <- "hello";
+    main() : 
+    Object {{
+        a <- b.copy();
+        (new IO).out_string(a);
+    }}; 
+};
+        "#;
+        compile_run_assert_output_eq(code, "hello");
     }
 
     #[test]
