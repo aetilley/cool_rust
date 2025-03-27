@@ -6,7 +6,6 @@ use either::Either::Left;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
 
-
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 
@@ -364,7 +363,6 @@ impl<'ctx> CodeGenManager<'ctx> {
                 phi_basic.into_pointer_value()
             }
             ExprData::TypCase { expr, cases } => {
-                println!("Generating code for {:?} and {:?}", expr, cases);
                 let val = self.codegen(expr);
 
                 let mut types = Vec::<IntValue>::new();
@@ -379,6 +377,13 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let membership_predicate = self.code_membership_predicate_for_types(&types);
                 let min_finder = self.code_min_bound_finder_for_predicate(membership_predicate);
 
+                let current_fn = self
+                    .module
+                    .get_function(self.current_fn.as_ref().unwrap())
+                    .unwrap();
+                let last_block = current_fn.get_last_basic_block().unwrap();
+                self.builder.position_at_end(last_block);
+
                 let class_id = self.load_int_field_from_pointer_at_struct(
                     val,
                     OBJECT,
@@ -387,25 +392,14 @@ impl<'ctx> CodeGenManager<'ctx> {
                 );
                 let min_bound_id = self
                     .builder
-                    .build_call(min_finder, &[class_id.into()], "min type")
+                    .build_call(min_finder, &[class_id.into()], "top min type")
                     .unwrap()
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_int_value();
 
-                let selector = self.build_select_and_eval_case_for_cases(cases);
-
-                let result = self
-                .builder
-                .build_call(selector, &[val.into(), min_bound_id.into()], "result")
-                .unwrap()
-                .try_as_basic_value()
-                .left()
-                .unwrap()
-                .into_pointer_value();
-                
-                result
+                self.code_select_and_eval_case(val, min_bound_id, cases.clone())
             }
             ExprData::Let {
                 id,

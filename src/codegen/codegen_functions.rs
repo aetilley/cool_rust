@@ -4,7 +4,6 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, FunctionType};
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
-use inkwell::IntPredicate;
 
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
@@ -219,96 +218,6 @@ impl<'ctx> CodeGenManager<'ctx> {
 
     // External functions.
 
-    fn code_is_subtype(&self) {
-        let fn_type = self
-            .bool_ty
-            .fn_type(&[self.i32_ty.into(), self.i32_ty.into()], true);
-        let fn_val = self.module.add_function(IS_SUBTYPE, fn_type, None);
-        // set arguments names
-        for (i, arg) in fn_val.get_param_iter().enumerate() {
-            arg.into_int_value().set_name(&format!("type_{}", i));
-        }
-        let (_, _) = self.code_function_entry(IS_SUBTYPE);
-
-        let type_1 = fn_val.get_first_param().unwrap().into_int_value();
-        let type_2 = fn_val.get_last_param().unwrap().into_int_value();
-
-        // Three branches, 1) is_equal, 2) is_object, 3) recurse with parent
-        let is_equal_pred: IntValue = self
-            .builder
-            .build_int_compare::<IntValue>(IntPredicate::EQ, type_1, type_2, "equal types")
-            .unwrap();
-        let is_equal_fn = || self.bool_ty.const_int(1, false);
-
-        let object_type = self.sym_to_class_id_int_val(&sym("Object"));
-        let type_1_is_object: IntValue = self
-            .builder
-            .build_int_compare::<IntValue>(IntPredicate::EQ, type_1, object_type, "equal types")
-            .unwrap();
-
-        // If type_1 is Object then we return true iff type_2 is Object.
-        let type_1_is_object_fn = || {
-            let type_2_is_object: IntValue = self
-                .builder
-                .build_int_compare::<IntValue>(IntPredicate::EQ, type_2, object_type, "equal types")
-                .unwrap();
-            type_2_is_object
-        };
-
-        let recurse_fn = || {
-            // If the types are not equal and type_1 is not Object, then
-            // we recursively call this function on type_1's parent and type_2.
-            let parent_vector_pointer = self
-                .module
-                .get_global(PARENT_VECTOR)
-                .unwrap()
-                .as_pointer_value();
-            let parent_vector_ty = self
-                .i32_ty
-                .vec_type(self.ct.class_id_order.len().try_into().unwrap());
-            let parent_vector = self
-                .builder
-                .build_load(parent_vector_ty, parent_vector_pointer, "Parent Vector")
-                .unwrap()
-                .into_vector_value();
-            let type_1_parent = self
-                .builder
-                .build_extract_element(parent_vector, type_1, "type_1_parent")
-                .unwrap();
-            self.builder
-                .build_call(fn_val, &[type_1_parent.into(), type_2.into()], "recurse")
-                .unwrap()
-                .try_as_basic_value()
-                .left()
-                .unwrap()
-                .into_int_value()
-        };
-
-        // If equal we are done and return true.
-        // Otherwise we check if it is of type Object and if not recurse with parent
-        let not_equal_fn = || {
-            self.cond_builder(
-                type_1_is_object,
-                type_1_is_object_fn,
-                recurse_fn,
-                self.bool_ty.into(),
-                Some(fn_val),
-            )
-            .into_int_value()
-        };
-        let result: IntValue = self
-            .cond_builder(
-                is_equal_pred,
-                is_equal_fn,
-                not_equal_fn,
-                self.bool_ty.into(),
-                Some(fn_val),
-            )
-            .into_int_value();
-
-        self.builder.build_return(Some(&result)).unwrap();
-    }
-
     fn declare_printf(&self) {
         let fn_type = self.i32_ty.fn_type(&[self.ptr_ty.into()], true);
         self.module
@@ -520,7 +429,6 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     fn code_native_method_bodies(&mut self) {
-        self.code_is_subtype();
         self.declare_gets();
         self.declare_strcmp();
         self.declare_strlen();
@@ -591,33 +499,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder
             .build_call(main_dot_main, &[main_instance.into()], "call_Main.main")
             .unwrap();
-        // let is_subtype = self.module.get_function(IS_SUBTYPE).unwrap();
-        // let int1 = self.sym_to_class_id_int_val(&sym("Orange"));
-        // let int2 = self.sym_to_class_id_int_val(&sym("Apple"));
-        // let ret = self
-        //     .builder
-        //     .build_call(is_subtype, &[int1.into(), int2.into()], "is_subtype")
-        //     .unwrap()
-        //     .try_as_basic_value()
-        //     .left()
-        //     .unwrap()
-        //     .into_int_value();
-        // let ret_cast = self
-        //     .builder
-        //     .build_int_z_extend(ret, self.i32_ty, "cats to i32")
-        //     .unwrap();
-        // let int_struct = self.code_new_int(ret_cast);
-
-        // let io_struct = self.code_new_and_init(&sym(IO));
-        // let _ = self
-        //     .builder
-        //     .build_call(
-        //         self.module.get_function("IO.out_int").unwrap(),
-        //         &[io_struct.into(), int_struct.into()],
-        //         "is_subtype",
-        //     )
-        //     .unwrap();
-
         self.builder.build_return(None).unwrap();
         fn_val.verify(false);
     }

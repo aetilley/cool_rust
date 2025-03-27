@@ -116,24 +116,20 @@ impl CodeGenManager<'_> {
 
         let class_id_order: Vec<Sym> = self.ct.class_id_order.clone();
         for cls in class_id_order.iter() {
-            let parent_id: IntValue;
-            if cls == &sym("Object") {
-                parent_id = self
-                    .i32_ty
-                    .const_int(class_id_order.len().try_into().unwrap(), false);
+            let parent_id = if cls == &sym("Object") {
+                self.i32_ty
+                    .const_int(class_id_order.len().try_into().unwrap(), false)
             } else {
-                parent_id = self.sym_to_class_id_int_val(&self.ct.class_parent[cls]);
-            }
+                self.sym_to_class_id_int_val(&self.ct.class_parent[cls])
+            };
             initializer_fields.push(parent_id);
         }
 
         let initializer = VectorType::const_vector(&initializer_fields[..]);
 
-        let parent_vector_global = self.module.add_global(
-            initializer.get_type(),
-            Some(self.aspace),
-            PARENT_VECTOR,
-        );
+        let parent_vector_global =
+            self.module
+                .add_global(initializer.get_type(), Some(self.aspace), PARENT_VECTOR);
 
         parent_vector_global.set_initializer(&initializer);
     }
