@@ -26,8 +26,12 @@ impl CodeGenManager<'_> {
             "strtol" => self.context.i64_type().fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
             // char* strcpy( char* dest, const char* src );
             "strcpy" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into()], false),
+            // char *strncpy(char *dest, const char *src, size_t n);
+            "strncpy" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
             // char* strcat( char *dest, const char *src );
             "strcat" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into()], false),
+            // char *strncat( char *dest, const char *src, size_t count );
+            "strncat" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
             // void *memcpy(void *to, const void *from, size_t numBytes);
             "memcpy" => self.context.void_type().fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
             // void abort()
@@ -217,160 +221,129 @@ impl CodeGenManager<'_> {
         self.builder.build_return(Some(&result)).unwrap();
     }
 
-    fn code_string_concat(&self) {
+    fn code_string_concat(&mut self) {
         let fn_name = method_ref(&sym(STRING), &sym(CONCAT));
-        let (_fn_val, _entry_block) = self.code_function_entry(&fn_name);
+        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
-        // Warning message
-        let format_string_array = self.code_array_value_from_sym(&sym("%s\n\0"));
-
-        let format_string_ptr = self
+        let slf = fn_val.get_first_param().unwrap().into_pointer_value();
+        let arg = fn_val.get_last_param().unwrap().into_pointer_value();
+        // Get String array from second field of *String
+        let slf_content_ptr = self
             .builder
-            .build_alloca(format_string_array.get_type(), "ptr to fmt string")
+            .build_struct_gep(self.cl_string_ty, slf, STRING_CONTENT_IND, "gep")
+            .unwrap();
+        let arg_content_ptr = self
+            .builder
+            .build_struct_gep(self.cl_string_ty, arg, STRING_CONTENT_IND, "gep")
+            .unwrap();
+
+        let slf_len_struct =
+            self.load_pointer_field_from_pointer_at_struct(slf, STRING, STRING_LEN_IND);
+        let slf_len = self.load_int_field_from_pointer_at_struct(
+            slf_len_struct,
+            INT,
+            self.i32_ty,
+            INT_VAL_IND,
+        );
+        let arg_len_struct =
+            self.load_pointer_field_from_pointer_at_struct(arg, STRING, STRING_LEN_IND);
+        let arg_len = self.load_int_field_from_pointer_at_struct(
+            arg_len_struct,
+            INT,
+            self.i32_ty,
+            INT_VAL_IND,
+        );
+
+        //let one = self.i32_ty.const_int(1, false);
+        //let sum = self.builder.build_int_add(slf_len, arg_len, "sum").unwrap();
+        //let total = self.builder.build_int_add(sum, one, "total").unwrap();
+
+        let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
+        let new_space = self
+            .builder
+            .build_array_alloca(self.i8_ty, buff_size, "array_alloca")
             .unwrap();
 
         self.builder
-            .build_store(format_string_ptr, format_string_array)
-            .unwrap();
-
-        let warning_array =
-            self.code_array_value_from_sym(&sym(&format!("{} is not yet implemented\0", fn_name)));
-        let warning_ptr = self
-            .builder
-            .build_alloca(warning_array.get_type(), "ptr to warning")
-            .unwrap();
-        self.builder
-            .build_store(warning_ptr, warning_array)
-            .unwrap();
-
-        let printf = self.module.get_function("printf").unwrap();
-        let _call = self
-            .builder
             .build_call(
-                printf,
-                &[format_string_ptr.into(), warning_ptr.into()],
-                "call_printf",
+                self.module.get_function("strncpy").unwrap(),
+                &[new_space.into(), slf_content_ptr.into(), slf_len.into()],
+                "strncpy",
             )
             .unwrap();
 
-        let result = self.ptr_ty.const_null();
+        self.builder
+            .build_call(
+                self.module.get_function("strncat").unwrap(),
+                &[new_space.into(), arg_content_ptr.into(), arg_len.into()],
+                "strncat",
+            )
+            .unwrap();
+
+        let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
+        let result = self.code_new_string_from_ptr(new_space, array_type);
+        //let result = self.ptr_ty.const_null();
         self.builder.build_return(Some(&result)).unwrap();
-    }
-
-    // fn code_string_concat(&mut self) {
-    //     let fn_name = method_ref(&sym(STRING), &sym(CONCAT));
-    //     let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
-
-    //     let slf = fn_val.get_first_param().unwrap().into_pointer_value();
-    //     let arg = fn_val.get_last_param().unwrap().into_pointer_value();
-    //     // Get String array from second field of *String
-    //     let slf_content_ptr = self
-    //         .builder
-    //         .build_struct_gep(self.cl_string_ty, slf, STRING_CONTENT_IND, "gep")
-    //         .unwrap();
-    //     let arg_content_ptr = self
-    //         .builder
-    //         .build_struct_gep(self.cl_string_ty, arg, STRING_CONTENT_IND, "gep")
-    //         .unwrap();
-
-    //     // let slf_len =
-    //     //     self.load_int_field_from_pointer_at_struct(slf, STRING, self.i32_ty, STRING_LEN_IND);
-    //     // let arg_len =
-    //     //     self.load_int_field_from_pointer_at_struct(arg, STRING, self.i32_ty, STRING_LEN_IND);
-
-    //     let reserved = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
-    //     let new_string = self
-    //         .builder
-    //         .build_array_malloc(self.i8_ty, reserved, "new_str")
-    //         .unwrap();
-
-    //     self.builder
-    //         .build_call(
-    //             self.module.get_function("strcpy").unwrap(),
-    //             &[new_string.into(), slf_content_ptr.into()],
-    //             "strcpy",
-    //         )
-    //         .unwrap();
-
-    //     self.builder
-    //         .build_call(
-    //             self.module.get_function("strcat").unwrap(),
-    //             &[new_string.into(), arg_content_ptr.into()],
-    //             "strcpy",
-    //         )
-    //         .unwrap();
-
-    //     let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
-    //     let result = self.code_new_string_from_ptr(new_string, array_type);
-    //     self.builder.build_return(Some(&result)).unwrap();
-    //     fn_val.verify(false);
-    // }
-
-    fn code_string_substring(&mut self) {
-        let fn_name = method_ref(&sym(STRING), &sym(SUBSTRING));
-        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
-        let body_val = self.codegen(&Expr::new(&sym("Object")));
-        self.builder.build_return(Some(&body_val)).unwrap();
         fn_val.verify(false);
     }
 
-    // fn code_string_substring(&self) {
-    //     let fn_name = method_ref(&sym(STRING), &sym(SUBSTRING));
-    //     let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
+    fn code_string_substring(&self) {
+        let fn_name = method_ref(&sym(STRING), &sym(SUBSTRING));
+        let (fn_val, _entry_block) = self.code_function_entry(&fn_name);
 
-    //     let original_string = fn_val.get_first_param().unwrap().into_pointer_value();
-    //     let original_field = self
-    //         .builder
-    //         .build_struct_gep(
-    //             self.cl_string_ty,
-    //             original_string,
-    //             STRING_CONTENT_IND,
-    //             "gep",
-    //         )
-    //         .unwrap();
+        let original_string = fn_val.get_first_param().unwrap().into_pointer_value();
+        let original_field = self
+            .builder
+            .build_struct_gep(
+                self.cl_string_ty,
+                original_string,
+                STRING_CONTENT_IND,
+                "gep",
+            )
+            .unwrap();
 
-    //     let begin_int_ptr = fn_val.get_nth_param(1).unwrap().into_pointer_value();
-    //     let begin = self.load_int_field_from_pointer_at_struct(
-    //         begin_int_ptr,
-    //         INT,
-    //         self.i32_ty,
-    //         INT_VAL_IND,
-    //     );
-    //     let length_int_ptr = fn_val.get_nth_param(2).unwrap().into_pointer_value();
-    //     let length = self.load_int_field_from_pointer_at_struct(
-    //         length_int_ptr,
-    //         INT,
-    //         self.i32_ty,
-    //         INT_VAL_IND,
-    //     );
-    //     let src_ptr = unsafe {
-    //         self.builder
-    //             .build_in_bounds_gep(self.i8_ty, original_field, &[begin], "index")
-    //             .unwrap()
-    //     };
+        let begin_int_ptr = fn_val.get_nth_param(1).unwrap().into_pointer_value();
+        let begin = self.load_int_field_from_pointer_at_struct(
+            begin_int_ptr,
+            INT,
+            self.i32_ty,
+            INT_VAL_IND,
+        );
+        let length_int_ptr = fn_val.get_nth_param(2).unwrap().into_pointer_value();
+        let length = self.load_int_field_from_pointer_at_struct(
+            length_int_ptr,
+            INT,
+            self.i32_ty,
+            INT_VAL_IND,
+        );
+        let src_ptr = unsafe {
+            self.builder
+                .build_in_bounds_gep(self.i8_ty, original_field, &[begin], "index")
+                .unwrap()
+        };
 
-    //     let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
-    //     let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
-    //     let dest_ptr = self
-    //         .builder
-    //         .build_array_malloc(self.i8_ty, buff_size, "buffer_ptr")
-    //         .unwrap();
-    //     // Call to memcpy
-    //     // self.builder
-    //     //     .build_memcpy(dest_ptr, 64, src_ptr, 64, length)
-    //     //     .unwrap();
-    //     self.builder
-    //         .build_call(
-    //             self.module.get_function("memcpy").unwrap(),
-    //             &[dest_ptr.into(), src_ptr.into(), length.into()],
-    //             "call memcpy",
-    //         )
-    //         .unwrap();
+        let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
+        let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
+        let dest_ptr = self
+            .builder
+            .build_array_malloc(self.i8_ty, buff_size, "buffer_ptr")
+            .unwrap();
+        // Call to memcpy
+        // self.builder
+        //     .build_memcpy(dest_ptr, 64, src_ptr, 64, length)
+        //     .unwrap();
+        self.builder
+            .build_call(
+                self.module.get_function("memcpy").unwrap(),
+                &[dest_ptr.into(), src_ptr.into(), length.into()],
+                "call memcpy",
+            )
+            .unwrap();
 
-    //     let result = self.code_new_string_from_ptr(dest_ptr, array_type);
+        let result = self.code_new_string_from_ptr(dest_ptr, array_type);
 
-    //     self.builder.build_return(Some(&result)).unwrap();
-    // }
+        self.builder.build_return(Some(&result)).unwrap();
+    }
 
     fn code_object_abort(&self) {
         let fn_name = method_ref(&sym(OBJECT), &sym(ABORT));
@@ -470,16 +443,13 @@ impl CodeGenManager<'_> {
 
         self.code_object_abort();
         self.code_object_type_name();
-        // NI
         self.code_object_copy();
         self.code_io_out_string();
         self.code_io_out_int();
         self.code_io_in_string();
         self.code_io_in_int();
         self.code_string_length();
-        // NI
         self.code_string_concat();
-        // NI
         self.code_string_substring();
     }
 }

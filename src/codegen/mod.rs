@@ -11,6 +11,7 @@ use crate::class_table::ClassTable;
 use crate::env::Env;
 use crate::symbol::Sym;
 
+use codegen_constants::MAX_IN_STRING_LEN;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -91,7 +92,10 @@ impl<'ctx> CodeGenManager<'ctx> {
         let string_attrs = &[
             i32_ty.into(),
             ptr_ty.into(),
-            context.i8_type().array_type(0).into(),
+            context
+                .i8_type()
+                .array_type(MAX_IN_STRING_LEN.try_into().unwrap())
+                .into(),
         ];
         cl_string_ty.set_body(string_attrs, false);
 
@@ -247,18 +251,15 @@ class Main {
         compile_run_assert_output_eq(code, "");
     }
 
-    // #[test]
+    #[test]
     fn test_codegen_string_concat() {
         let code = r#"
-        
        class Main {
     io: IO <- new IO; 
   main() : Object {{
-      io.out_string("hello".concat(" world"));
+      (new IO).out_string("hello".concat(" world"));
     }}; 
 };
-
-
         "#;
         compile_run_assert_output_eq(code, "hello world");
     }
@@ -326,7 +327,7 @@ class Main {
         compile_run_assert_output_eq(code, "5\n4");
     }
 
-    // #[test]
+    #[test]
     fn test_codegen_string_substr() {
         let code = r#"
 class Main {
