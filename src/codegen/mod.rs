@@ -11,7 +11,6 @@ use crate::class_table::ClassTable;
 use crate::env::Env;
 use crate::symbol::Sym;
 
-use codegen_constants::MAX_IN_STRING_LEN;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -88,15 +87,8 @@ impl<'ctx> CodeGenManager<'ctx> {
         let bool_attrs = &[i32_ty.into(), bool_ty.into()];
         cl_bool_ty.set_body(bool_attrs, false);
 
-        // class_id, ptr to in for length, str content
-        let string_attrs = &[
-            i32_ty.into(),
-            ptr_ty.into(),
-            context
-                .i8_type()
-                .array_type(MAX_IN_STRING_LEN.try_into().unwrap())
-                .into(),
-        ];
+        // class_id, ptr to int for length, str array ptr
+        let string_attrs = &[i32_ty.into(), ptr_ty.into(), ptr_ty.into()];
         cl_string_ty.set_body(string_attrs, false);
 
         let mut man = CodeGenManager {
@@ -129,7 +121,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
         man.code_struct_size_table();
 
-        man.register_globals();
+        man.register_static_constants();
 
         man.code_type_name_vector();
 

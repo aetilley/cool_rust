@@ -3,7 +3,7 @@ use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{sym, Sym};
 use inkwell::basic_block::BasicBlock;
-use inkwell::types::{ArrayType, BasicMetadataTypeEnum, BasicTypeEnum, FunctionType, IntType};
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum, FunctionType, IntType};
 use inkwell::values::{ArrayValue, IntValue};
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::IntPredicate;
@@ -45,36 +45,23 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.i8_ty.const_array(&array_values[..])
     }
 
-    pub fn code_new_string_from_array(&self, str_array: ArrayValue) -> PointerValue<'ctx> {
-        let new_ptr = self.code_new_and_init(&sym("String"));
-
-        let pointee_ty = self.context.get_struct_type("String").unwrap();
-        // set Length
-        let value = self
-            .context
-            .i32_type()
-            .const_int(str_array.get_type().len() as u64, false);
-        let field = self
+    pub fn code_array_ptr_from_sym(&self, s: &Sym) -> PointerValue<'ctx> {
+        let array = self.code_array_value_from_sym(s);
+        let array_ptr = self
             .builder
-            .build_struct_gep(pointee_ty, new_ptr, STRING_LEN_IND, "gep")
+            .build_array_malloc(
+                self.i8_ty,
+                self.i32_ty.const_int(array.get_type().len().into(), false),
+                "array_malloc",
+            )
             .unwrap();
-        self.builder.build_store(field, value).unwrap();
 
-        // set array
-        let field = self
-            .builder
-            .build_struct_gep(pointee_ty, new_ptr, STRING_CONTENT_IND, "gep")
-            .unwrap();
-        self.builder.build_store(field, str_array).unwrap();
+        self.builder.build_store(array_ptr, array).unwrap();
 
-        new_ptr
+        array_ptr
     }
 
-    pub fn code_new_string_from_ptr(
-        &self,
-        str_array_ptr: PointerValue,
-        array_type: ArrayType,
-    ) -> PointerValue<'ctx> {
+    pub fn code_new_string_from_ptr(&self, str_array_ptr: PointerValue) -> PointerValue<'ctx> {
         let new_ptr = self.code_new_and_init(&sym("String"));
 
         // Get length
@@ -109,12 +96,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             .builder
             .build_struct_gep(self.cl_string_ty, new_ptr, STRING_CONTENT_IND, "gep")
             .unwrap();
-        let value = self
-            .builder
-            .build_load(array_type, str_array_ptr, "array")
-            .unwrap()
-            .into_array_value();
-        self.builder.build_store(field, value).unwrap();
+        self.builder.build_store(field, str_array_ptr).unwrap();
 
         new_ptr
     }

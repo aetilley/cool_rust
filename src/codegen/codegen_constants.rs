@@ -73,6 +73,13 @@ pub fn global_int_ref(i: &Sym) -> String {
     format!("int_{}", hasher.finish())
 }
 
+pub fn global_str_content_ref(s: &Sym) -> String {
+    let s_str = &s[..];
+    let mut hasher = DefaultHasher::new();
+    s_str.hash(&mut hasher);
+    format!("content_array_{}", hasher.finish())
+}
+
 pub fn global_string_ref(s: &Sym) -> String {
     let s_str = &s[..];
     let mut hasher = DefaultHasher::new();

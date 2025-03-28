@@ -69,14 +69,14 @@ impl<'ctx> CodeGenManager<'ctx> {
             .unwrap();
         self.builder.build_store(field, value_ptr).unwrap();
 
-        // set ptr -> ""
+        // set ptr
 
-        let value = self.i8_ty.const_array(&[]);
+        let ptr = self.code_array_ptr_from_sym(&sym(""));
         let field = self
             .builder
             .build_struct_gep(self.cl_string_ty, self_alloca, STRING_CONTENT_IND, "gep")
             .unwrap();
-        self.builder.build_store(field, value).unwrap();
+        self.builder.build_store(field, ptr).unwrap();
     }
 
     pub fn sym_to_class_id_int_val(&self, s: &Sym) -> IntValue<'ctx> {

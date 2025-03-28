@@ -227,14 +227,26 @@ impl CodeGenManager<'_> {
         int_global.set_initializer(&initializer);
     }
 
+    pub fn register_global_string_content(&self, s: &Sym) -> PointerValue {
+        let initializer = self.code_array_value_from_sym(s);
+        let glbl = self.module.add_global(
+            initializer.get_type(),
+            Some(self.aspace),
+            &global_str_content_ref(s),
+        );
+        glbl.set_initializer(&initializer);
+        glbl.as_pointer_value()
+    }
+
     // Must do this after globals for ints.
 
     pub fn register_global_for_string(&mut self, s: &Sym) {
+        // TODO check first to avoid duplicates.
         let len_str = &format!("{}", s.len());
         self.register_global_for_int(&sym(len_str));
 
         // Content
-        let str_content = self.code_array_value_from_sym(s);
+        let content_glbl = self.register_global_string_content(s);
         // Len as struct Int
 
         let len_str = &format!("{}", s.len());
@@ -248,7 +260,7 @@ impl CodeGenManager<'_> {
             &[
                 self.sym_to_class_id_int_val(&sym(STRING)).into(),
                 str_len_struct_ptr.into(),
-                str_content.into(),
+                content_glbl.into(),
             ],
             false,
         );
@@ -262,7 +274,7 @@ impl CodeGenManager<'_> {
         string_global.set_initializer(&initializer);
     }
 
-    pub fn register_globals(&mut self) {
+    pub fn register_static_constants(&mut self) {
         for i in dump_ints().iter() {
             self.register_global_for_int(i);
         }

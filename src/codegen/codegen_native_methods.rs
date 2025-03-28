@@ -24,12 +24,8 @@ impl CodeGenManager<'_> {
             "fdopen" => self.ptr_ty.fn_type(&[self.i32_ty.into(), self.ptr_ty.into()], false),
             // long int strtol(const char *nptr, char **endptr, int base);
             "strtol" => self.context.i64_type().fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
-            // char* strcpy( char* dest, const char* src );
-            "strcpy" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into()], false),
             // char *strncpy(char *dest, const char *src, size_t n);
             "strncpy" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
-            // char* strcat( char *dest, const char *src );
-            "strcat" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into()], false),
             // char *strncat( char *dest, const char *src, size_t count );
             "strncat" => self.ptr_ty.fn_type(&[self.ptr_ty.into(), self.ptr_ty.into(), self.i32_ty.into()], false),
             // void *memcpy(void *to, const void *from, size_t numBytes);
@@ -107,6 +103,12 @@ impl CodeGenManager<'_> {
             .build_struct_gep(self.cl_string_ty, arg, STRING_CONTENT_IND, "gep")
             .unwrap();
 
+        let to_print_ptr = self
+            .builder
+            .build_load(self.ptr_ty, to_print_field, "content ptr")
+            .unwrap()
+            .into_pointer_value();
+
         let format_string_array = self.code_array_value_from_sym(&sym("%s\n\0"));
 
         let format_string_ptr = self
@@ -123,7 +125,7 @@ impl CodeGenManager<'_> {
             .builder
             .build_call(
                 printf,
-                &[format_string_ptr.into(), to_print_field.into()],
+                &[format_string_ptr.into(), to_print_ptr.into()],
                 "call_printf",
             )
             .unwrap();
@@ -135,7 +137,6 @@ impl CodeGenManager<'_> {
 
     fn code_read_stdin_to_ptr(&self) -> PointerValue {
         // Common code used in both String.in_ methods.
-
         let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
         let dest_ptr = self
             .builder
@@ -181,11 +182,10 @@ impl CodeGenManager<'_> {
     fn code_io_in_string(&self) {
         let fn_name = method_ref(&sym(IO), &sym(IN_STRING));
         let (_fn_val, _entry_block) = self.code_function_entry(&fn_name);
-        let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
 
         let input = self.code_read_stdin_to_ptr();
 
-        let result = self.code_new_string_from_ptr(input, array_type);
+        let result = self.code_new_string_from_ptr(input);
 
         self.builder.build_return(Some(&result)).unwrap();
     }
@@ -228,14 +228,24 @@ impl CodeGenManager<'_> {
         let slf = fn_val.get_first_param().unwrap().into_pointer_value();
         let arg = fn_val.get_last_param().unwrap().into_pointer_value();
         // Get String array from second field of *String
-        let slf_content_ptr = self
+        let slf_content_field = self
             .builder
             .build_struct_gep(self.cl_string_ty, slf, STRING_CONTENT_IND, "gep")
             .unwrap();
-        let arg_content_ptr = self
+        let slf_content_ptr = self
+            .builder
+            .build_load(self.ptr_ty, slf_content_field, "self content ptr")
+            .unwrap()
+            .into_pointer_value();
+        let arg_content_field = self
             .builder
             .build_struct_gep(self.cl_string_ty, arg, STRING_CONTENT_IND, "gep")
             .unwrap();
+        let arg_content_ptr = self
+            .builder
+            .build_load(self.ptr_ty, arg_content_field, "arg content ptr")
+            .unwrap()
+            .into_pointer_value();
 
         let slf_len_struct =
             self.load_pointer_field_from_pointer_at_struct(slf, STRING, STRING_LEN_IND);
@@ -261,7 +271,7 @@ impl CodeGenManager<'_> {
         let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
         let new_space = self
             .builder
-            .build_array_alloca(self.i8_ty, buff_size, "array_alloca")
+            .build_array_malloc(self.i8_ty, buff_size, "malloc")
             .unwrap();
 
         self.builder
@@ -280,9 +290,7 @@ impl CodeGenManager<'_> {
             )
             .unwrap();
 
-        let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
-        let result = self.code_new_string_from_ptr(new_space, array_type);
-        //let result = self.ptr_ty.const_null();
+        let result = self.code_new_string_from_ptr(new_space);
         self.builder.build_return(Some(&result)).unwrap();
         fn_val.verify(false);
     }
@@ -301,6 +309,11 @@ impl CodeGenManager<'_> {
                 "gep",
             )
             .unwrap();
+        let original_pointer = self
+            .builder
+            .build_load(self.ptr_ty, original_field, "original string ptr")
+            .unwrap()
+            .into_pointer_value();
 
         let begin_int_ptr = fn_val.get_nth_param(1).unwrap().into_pointer_value();
         let begin = self.load_int_field_from_pointer_at_struct(
@@ -318,12 +331,11 @@ impl CodeGenManager<'_> {
         );
         let src_ptr = unsafe {
             self.builder
-                .build_in_bounds_gep(self.i8_ty, original_field, &[begin], "index")
+                .build_in_bounds_gep(self.i8_ty, original_pointer, &[begin], "index")
                 .unwrap()
         };
 
         let buff_size = self.i32_ty.const_int(MAX_IN_STRING_LEN, false);
-        let array_type = self.i8_ty.array_type(MAX_IN_STRING_LEN.try_into().unwrap());
         let dest_ptr = self
             .builder
             .build_array_malloc(self.i8_ty, buff_size, "buffer_ptr")
@@ -340,7 +352,7 @@ impl CodeGenManager<'_> {
             )
             .unwrap();
 
-        let result = self.code_new_string_from_ptr(dest_ptr, array_type);
+        let result = self.code_new_string_from_ptr(dest_ptr);
 
         self.builder.build_return(Some(&result)).unwrap();
     }
