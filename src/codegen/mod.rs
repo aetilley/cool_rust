@@ -4,6 +4,7 @@ mod codegen_expr;
 mod codegen_functions;
 mod codegen_globals;
 mod codegen_native_methods;
+mod codegen_structs;
 mod codegen_utils;
 
 use crate::ast::Program;
@@ -69,28 +70,6 @@ impl<'ctx> CodeGenManager<'ctx> {
         let cl_int_ty = context.opaque_struct_type("Int");
         let cl_bool_ty = context.opaque_struct_type("Bool");
 
-        // Struct Types for Native Classes
-
-        // class_id
-        let object_attrs = &[i32_ty.into()];
-        cl_object_ty.set_body(object_attrs, false);
-
-        // class_id
-        let io_attrs = &[i32_ty.into()];
-        cl_io_ty.set_body(io_attrs, false);
-
-        // class_id, value
-        let int_attrs = &[i32_ty.into(), i32_ty.into()];
-        cl_int_ty.set_body(int_attrs, false);
-
-        // class_id, value
-        let bool_attrs = &[i32_ty.into(), bool_ty.into()];
-        cl_bool_ty.set_body(bool_attrs, false);
-
-        // class_id, ptr to int for length, str array ptr
-        let string_attrs = &[i32_ty.into(), ptr_ty.into(), ptr_ty.into()];
-        cl_string_ty.set_body(string_attrs, false);
-
         let mut man = CodeGenManager {
             context,
             builder,
@@ -111,23 +90,25 @@ impl<'ctx> CodeGenManager<'ctx> {
             cl_bool_ty,
         };
 
+        man.code_native_class_structs();
+
         man.code_program_class_structs();
 
-        man.code_all_method_declarations();
+        man.code_all_function_declarations();
 
-        man.code_vtable_master_vector();
+        man.code_vtable_master_table();
 
-        man.code_parent_vector();
+        man.code_parent_table();
 
         man.code_struct_size_table();
 
         man.register_static_constants();
 
-        man.code_type_name_vector();
+        man.code_type_name_table();
 
-        man.code_all_inits();
+        man.code_all_initializer_definitions();
 
-        man.code_all_method_bodies();
+        man.code_all_method_definitions();
 
         man.code_main();
 
@@ -159,14 +140,14 @@ mod codegen_tests {
     use std::process::Command;
     use std::{env, fs};
 
-    fn compile_run_assert_output_eq(code: &str, output: &str) {
+    fn compile_run_assert_output_contains(code: &str, output: &str) {
         let mut program = Program::parse_from(code).unwrap();
         program.semant().unwrap();
         program.to_llvm("test_tmp.ll");
-        run_assert_output_eq("test_tmp.ll", output);
+        run_assert_output_contains("test_tmp.ll", output);
     }
 
-    fn run_assert_output_eq(filename: &str, output: &str) {
+    fn run_assert_output_contains(filename: &str, output: &str) {
         let llvm_dir = env::var("LLVM_PATH").unwrap();
         let llc_path = format!("{}/bin/llc", llvm_dir);
         let clang_path = format!("{}/bin/clang", llvm_dir);
@@ -198,7 +179,7 @@ mod codegen_tests {
     #[test]
     fn test_codegen_simplest() {
         let code = "class Main{main():Object{0};};";
-        compile_run_assert_output_eq(code, "");
+        compile_run_assert_output_contains(code, "");
     }
 
     #[test]
@@ -214,19 +195,19 @@ class Main {
     }}; 
 };
         "#;
-        compile_run_assert_output_eq(code, "hello");
+        compile_run_assert_output_contains(code, "hello");
     }
 
     #[test]
     fn test_codegen_simple_out_string() {
         let code = r#"class Main{main():Object{(new IO).out_string("hello")};};"#;
-        compile_run_assert_output_eq(code, "hello");
+        compile_run_assert_output_contains(code, "hello");
     }
 
     #[test]
     fn test_codegen_simple_out_int() {
         let code = r#"class Main{main():Object{(new IO).out_int(42)};};"#;
-        compile_run_assert_output_eq(code, "42");
+        compile_run_assert_output_contains(code, "42");
     }
 
     #[test]
@@ -240,7 +221,7 @@ class Main {
             };  
         };
         "#;
-        compile_run_assert_output_eq(code, "");
+        compile_run_assert_output_contains(code, "");
     }
 
     #[test]
@@ -253,7 +234,7 @@ class Main {
     }}; 
 };
         "#;
-        compile_run_assert_output_eq(code, "hello world");
+        compile_run_assert_output_contains(code, "hello world");
     }
 
     #[test]
@@ -271,7 +252,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "hello\nbonjour\nhola");
+        compile_run_assert_output_contains(code, "hello\nbonjour\nhola");
     }
 
     #[test]
@@ -290,17 +271,16 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "hello\ngoodbye");
+        compile_run_assert_output_contains(code, "hello\ngoodbye");
     }
 
-    //#[test]
-    // How to do this?
+    // #[test]
     fn test_codegen_simple_in_string() {
         todo!();
     }
 
-    //#[test]
-    // How to do this?
+    // #[test]
+    // TODO: How to test with console input?
     fn test_codegen_simple_in_int() {
         todo!();
     }
@@ -316,7 +296,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "5\n4");
+        compile_run_assert_output_contains(code, "5\n4");
     }
 
     #[test]
@@ -330,7 +310,7 @@ class Main {
 };
 
 "#;
-        compile_run_assert_output_eq(code, "llo");
+        compile_run_assert_output_contains(code, "llo");
     }
 
     #[test]
@@ -355,7 +335,7 @@ class Main {
     }}; 
 };
 "#;
-        compile_run_assert_output_eq(code, "Hello World!\nHola Mundo!");
+        compile_run_assert_output_contains(code, "Hello World!\nHola Mundo!");
     }
 
     #[test]
@@ -377,7 +357,7 @@ class Main {
         }}; 
     };
     "#;
-        compile_run_assert_output_eq(code, "Apple\nOrange\nString");
+        compile_run_assert_output_contains(code, "Apple\nOrange\nString");
     }
 
     #[test]
@@ -391,7 +371,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "goodbye\nhello");
+        compile_run_assert_output_contains(code, "goodbye\nhello");
     }
 
     #[test]
@@ -403,7 +383,7 @@ class Main {
     };
 };
 "#;
-        compile_run_assert_output_eq(code, "5");
+        compile_run_assert_output_contains(code, "5");
     }
 
     #[test]
@@ -420,7 +400,7 @@ class Main {
     };
 };
 "#;
-        compile_run_assert_output_eq(code, "2\n1");
+        compile_run_assert_output_contains(code, "2\n1");
     }
 
     #[test]
@@ -433,7 +413,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "NO\nYES");
+        compile_run_assert_output_contains(code, "NO\nYES");
     }
 
     #[test]
@@ -451,7 +431,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(
+        compile_run_assert_output_contains(
             code,
             "Time keeps on\nslippin\nslippin\nslippin\ninto the fuuuture....",
         );
@@ -470,7 +450,7 @@ class Main {
 
 "#;
 
-        compile_run_assert_output_eq(code, "43");
+        compile_run_assert_output_contains(code, "43");
     }
 
     #[test]
@@ -498,7 +478,7 @@ class Main {
 };
 
 "#;
-        compile_run_assert_output_eq(code, "Zero\nOne\nTwo\nOne\nZero");
+        compile_run_assert_output_contains(code, "Zero\nOne\nTwo\nOne\nZero");
     }
 
     #[test]
@@ -513,7 +493,7 @@ class Main {
 };
 "#;
 
-        compile_run_assert_output_eq(code, "YES\nNO");
+        compile_run_assert_output_contains(code, "YES\nNO");
     }
 
     #[test]
@@ -527,7 +507,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "YES\nNO");
+        compile_run_assert_output_contains(code, "YES\nNO");
     }
 
     #[test]
@@ -544,7 +524,7 @@ class Main {
 };
 "#;
 
-        compile_run_assert_output_eq(code, "NO\nYES");
+        compile_run_assert_output_contains(code, "NO\nYES");
     }
 
     #[test]
@@ -560,7 +540,7 @@ class Main {
 };
 "#;
 
-        compile_run_assert_output_eq(code, "NO\nNO\nYES");
+        compile_run_assert_output_contains(code, "NO\nNO\nYES");
     }
 
     #[test]
@@ -575,7 +555,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "YES\nNO\nYES");
+        compile_run_assert_output_contains(code, "YES\nNO\nYES");
     }
 
     #[test]
@@ -589,7 +569,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "-42\n0");
+        compile_run_assert_output_contains(code, "-42\n0");
     }
 
     #[test]
@@ -603,7 +583,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "NO\nYES");
+        compile_run_assert_output_contains(code, "NO\nYES");
     }
 
     #[test]
@@ -623,7 +603,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "NO\nNO\nYES");
+        compile_run_assert_output_contains(code, "NO\nNO\nYES");
     }
 
     #[test]
@@ -642,7 +622,7 @@ class Main {
     }};  
 };
 "#;
-        compile_run_assert_output_eq(code, "5\n2\n-1\n6\n3\n-3\n1");
+        compile_run_assert_output_contains(code, "5\n2\n-1\n6\n3\n-3\n1");
     }
 
     #[test]
@@ -658,7 +638,7 @@ class Main {
     };
 };
 "#;
-        compile_run_assert_output_eq(code, "44");
+        compile_run_assert_output_contains(code, "44");
     }
 
     #[test]
@@ -691,7 +671,7 @@ class Main {
     };
 };
 "#;
-        compile_run_assert_output_eq(code, "A12.");
+        compile_run_assert_output_contains(code, "A12.");
     }
 
     #[test]
@@ -724,6 +704,6 @@ class Main {
     };
 };
 "#;
-        compile_run_assert_output_eq(code, "A1.");
+        compile_run_assert_output_contains(code, "A1.");
     }
 }

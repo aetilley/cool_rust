@@ -2,47 +2,10 @@ use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 use crate::symbol::{dump_ints, dump_strings, sym, Sym};
 
-use inkwell::types::{BasicTypeEnum, VectorType};
+use inkwell::types::VectorType;
 use inkwell::values::BasicValueEnum;
 use inkwell::values::PointerValue;
-use inkwell::values::{ArrayValue, IntValue};
-
-// Declare and Code Program Class Structs
-impl CodeGenManager<'_> {
-    fn sym_to_llvm_type(&self, typ: &Sym) -> BasicTypeEnum {
-        if self.ct.native_classes.contains(typ) || self.ct.program_classes.contains(typ) {
-            return BasicTypeEnum::StructType(
-                self.context
-                    .get_struct_type(typ)
-                    .unwrap_or_else(|| panic!("No struct type for {}", typ)),
-            );
-        }
-        panic!("Cannot convert Sym {} to type", typ);
-    }
-
-    fn code_class_struct(&self, name: &Sym) {
-        // Start with class_id
-        let mut all_attr_types: Vec<BasicTypeEnum> = vec![self.i32_ty.into()];
-
-        let class_attrs = self.ct.get_all_attrs(name);
-        let field_types: Vec<BasicTypeEnum> = vec![self.ptr_ty.into(); class_attrs.len()];
-
-        all_attr_types.extend(field_types);
-        let typ = self.context.get_struct_type(name).unwrap();
-        typ.set_body(&all_attr_types, false);
-    }
-
-    pub fn code_program_class_structs(&self) {
-        // Must do all declarations before doing any coding.
-        for class in self.ct.program_classes.iter() {
-            self.context.opaque_struct_type(class);
-        }
-
-        for class in self.ct.program_classes.iter() {
-            self.code_class_struct(class)
-        }
-    }
-}
+use inkwell::values::{ArrayValue, GlobalValue, IntValue};
 
 // VTables
 impl<'ctx> CodeGenManager<'ctx> {
@@ -84,7 +47,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         vtable_global.as_pointer_value()
     }
 
-    pub fn code_vtable_master_vector(&mut self) {
+    pub fn code_vtable_master_table(&mut self) {
         // We make a global array whose ith element is a pointer to the vtable
         // for the class with class_id i.
         let mut initializer_fields = vec![];
@@ -110,7 +73,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
 // Parent table
 impl CodeGenManager<'_> {
-    pub fn code_parent_vector(&mut self) {
+    pub fn code_parent_table(&mut self) {
         // We make a global array whose ith element is the class_id of the parent
         // of the class with class_id i.
         let mut initializer_fields: Vec<IntValue> = vec![];
@@ -139,7 +102,7 @@ impl CodeGenManager<'_> {
 // Parent table
 impl CodeGenManager<'_> {
     pub fn code_struct_size_table(&mut self) {
-        // We make a global array whose ith element is the size of the class with class_id i.
+        // We make a global array whose ith element is the size in bytes of the class with class_id i.
         let mut initializer_fields: Vec<IntValue> = vec![];
 
         let class_id_order: Vec<Sym> = self.ct.class_id_order.clone();
@@ -160,7 +123,7 @@ impl CodeGenManager<'_> {
 
 // Parent table
 impl CodeGenManager<'_> {
-    pub fn code_type_name_vector(&mut self) {
+    pub fn code_type_name_table(&mut self) {
         // We make a global array whose ith element is the name of class with class_id i.
         let mut initializer_fields: Vec<BasicValueEnum> = vec![];
 
@@ -188,7 +151,8 @@ impl CodeGenManager<'_> {
 
 // Static constants
 impl CodeGenManager<'_> {
-    pub fn register_globals_for_boolean(&mut self, b: bool) {
+    pub fn register_globals_for_boolean(&self, b: bool) -> GlobalValue {
+        // Declare a Cool Bool static constant.
         let b_int: u64 = b.into();
         let b_val = self.bool_ty.const_int(b_int, false);
         let initializer = self.context.const_struct(
@@ -206,9 +170,12 @@ impl CodeGenManager<'_> {
                 .add_global(initializer.get_type(), Some(self.aspace), global_name);
 
         bool_global.set_initializer(&initializer);
+
+        bool_global
     }
 
-    pub fn register_global_for_int(&mut self, i: &Sym) {
+    pub fn register_global_for_int(&self, i: &Sym) -> GlobalValue {
+        // Declare a Cool Int static constant.
         let i_str: &str = &i[..];
         let i_int: u64 = i_str.parse().unwrap();
         let i_val = self.i32_ty.const_int(i_int, false);
@@ -225,9 +192,12 @@ impl CodeGenManager<'_> {
                 .add_global(initializer.get_type(), Some(self.aspace), global_name);
 
         int_global.set_initializer(&initializer);
+
+        int_global
     }
 
-    pub fn register_global_string_content(&self, s: &Sym) -> PointerValue {
+    pub fn register_global_string_content(&self, s: &Sym) -> GlobalValue {
+        // Declare a character array static constant.
         let initializer = self.code_array_value_from_sym(s);
         let glbl = self.module.add_global(
             initializer.get_type(),
@@ -235,46 +205,44 @@ impl CodeGenManager<'_> {
             &global_str_content_ref(s),
         );
         glbl.set_initializer(&initializer);
-        glbl.as_pointer_value()
+
+        glbl
     }
 
     // Must do this after globals for ints.
 
-    pub fn register_global_for_string(&mut self, s: &Sym) {
-        // TODO check first to avoid duplicates.
+    pub fn register_global_for_string(&self, s: &Sym) -> GlobalValue {
+        // Declare a Cool String static constant.
+        let class_id = self.sym_to_class_id_int_val(&sym(STRING)).into();
+
+        // Length as a global int.
         let len_str = &format!("{}", s.len());
-        self.register_global_for_int(&sym(len_str));
+        //  TODO:  See comment in `register_static_constants`
+        let str_len_glbl = match self.module.get_global(&global_int_ref(&sym(len_str))) {
+            Some(glbl) => glbl,
+            None => self.register_global_for_int(&sym(len_str)),
+        }
+        .as_pointer_value();
 
         // Content
-        let content_glbl = self.register_global_string_content(s);
-        // Len as struct Int
+        let content_glbl = self.register_global_string_content(s).as_pointer_value();
 
-        let len_str = &format!("{}", s.len());
-        let str_len_struct_ptr = self
-            .module
-            .get_global(&global_int_ref(&sym(len_str)))
-            .unwrap()
-            .as_pointer_value();
+        let initializer = self
+            .context
+            .const_struct(&[class_id, str_len_glbl.into(), content_glbl.into()], false);
 
-        let initializer = self.context.const_struct(
-            &[
-                self.sym_to_class_id_int_val(&sym(STRING)).into(),
-                str_len_struct_ptr.into(),
-                content_glbl.into(),
-            ],
-            false,
+        let string_global = self.module.add_global(
+            initializer.get_type(),
+            Some(self.aspace),
+            &global_string_ref(s),
         );
 
-        let global_name = &global_string_ref(s);
-
-        let string_global =
-            self.module
-                .add_global(initializer.get_type(), Some(self.aspace), global_name);
-
         string_global.set_initializer(&initializer);
+
+        string_global
     }
 
-    pub fn register_static_constants(&mut self) {
+    pub fn register_static_constants(&self) {
         for i in dump_ints().iter() {
             self.register_global_for_int(i);
         }
@@ -282,6 +250,18 @@ impl CodeGenManager<'_> {
         for s in dump_strings().iter() {
             self.register_global_for_string(s);
         }
+
+        // TODO:  It would be nice to just top off the string symbol table
+        // at the beginning of `register_static_constants` with type names
+        // (and the int table with their lengths) instead of including the
+        // additional global declaration here and in `register_global_for_string`.
+        // Unfortunately it seems that, for whatever reason, our global symbol
+        // pool does not allow new entries quite so close to when the
+        // pool is dumped (they do not appear in the dump).
+        // Until I debug why this is the case (or migrate to a
+        // different interning crate) we have to do this separately.
+        // and (if we wish to avoid the ugliness of duplicate global int
+        // definitions) check for duplicates ints in `register_global_for_string`.
         let native_classes = self.ct.native_classes.clone();
         for s in native_classes.iter() {
             self.register_global_for_string(s);

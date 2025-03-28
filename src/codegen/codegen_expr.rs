@@ -117,7 +117,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             ExprData::IsVoid { expr } => {
                 let val = self.codegen(expr);
                 let is_null = self.builder.build_is_null(val, "isnull").unwrap();
-                self.get_bool_for_value(is_null, None)
+                self.code_new_bool(is_null)
             }
 
             ExprData::Plus { lhs, rhs }
@@ -187,7 +187,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                     .build_int_compare::<IntValue>(comp_op, l_int_value, r_int_value, "ifcond")
                     .unwrap();
 
-                self.get_bool_for_value(does_compare, None)
+                self.code_new_bool(does_compare)
             }
             ExprData::Eq { lhs, rhs } => {
                 let lhs_ptr = self.codegen(lhs);
@@ -222,7 +222,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                         )
                         .unwrap();
 
-                    self.get_bool_for_value(are_equal, None)
+                    self.code_new_bool(are_equal)
                 } else if stype == STRING {
                     let l_array_field = self
                         .builder
@@ -268,7 +268,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                         )
                         .unwrap();
 
-                    self.get_bool_for_value(are_equal, None)
+                    self.code_new_bool(are_equal)
                 } else {
                     let lhs_to_int = self
                         .builder
@@ -290,7 +290,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                         )
                         .unwrap();
 
-                    self.get_bool_for_value(are_equal, None)
+                    self.code_new_bool(are_equal)
                 }
             }
             ExprData::Block { exprs } => {
@@ -537,7 +537,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
                 all_parameters.extend(parameters.to_owned());
                 let fn_type =
-                    self.get_function_type_from_signature(&all_parameters[..], &return_type);
+                    self.get_method_type_from_signature(&all_parameters[..], &return_type);
 
                 let fn_name = &method_ref(&sym("<Dynamic>"), method_name);
 

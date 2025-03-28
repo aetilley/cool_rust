@@ -4,50 +4,48 @@ use crate::symbol::{sym, Sym};
 use crate::codegen::codegen_constants::*;
 use crate::codegen::CodeGenManager;
 
-// Code function stubs.
-// We separate this because function body coding must come last, and meanwhile things like
-// globals will require function declarations.
+// We separate function declaration from function body definition because function body coding
+// must come last, and meanwhile things like vtable global constrution will require
+// function declarations.
 impl CodeGenManager<'_> {
-    pub fn code_all_method_declarations(&mut self) {
+    pub fn code_all_function_declarations(&mut self) {
         let classes = self.ct.program_classes.clone();
         for cls in classes {
-            self.code_class_init_declaration(&cls);
+            self.code_class_initializer_declaration(&cls);
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_declaration(method_ref(&cls, method), parameters, return_type);
+                self.code_function_declaration(method_ref(&cls, method), parameters, return_type);
             }
         }
         let native_classes = self.ct.native_classes.clone();
         for cls in native_classes {
-            self.code_class_init_declaration(&cls);
+            self.code_class_initializer_declaration(&cls);
             let methods = self.ct.class_methods.get(&cls).unwrap().clone();
             for (method, ((parameters, return_type), _)) in methods.iter() {
-                self.code_method_declaration(method_ref(&cls, method), parameters, return_type);
+                self.code_function_declaration(method_ref(&cls, method), parameters, return_type);
             }
         }
     }
 
-    fn code_method_declaration(
+    pub fn code_function_declaration(
         &mut self,
         fn_name: String,
         parameters: &[Formal],
         return_type: &Sym,
     ) {
+        // Just create a function of the appropriate type and name the parameters.
+
         // Must add self parameter.
         let mut all_parameters = vec![Formal::formal("self", "SELF_TYPE")];
         all_parameters.extend(parameters.to_owned());
 
-        let fn_type = self.get_function_type_from_signature(&all_parameters, return_type);
+        let fn_type = self.get_method_type_from_signature(&all_parameters, return_type);
         let fn_val = self.module.add_function(&fn_name, fn_type, None);
 
         // set arguments names
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             arg.into_pointer_value().set_name(&all_parameters[i].name);
         }
-    }
-
-    fn code_class_init_declaration(&mut self, cls: &Sym) {
-        self.code_method_declaration(init_ref(cls), &[], &sym(OBJECT))
     }
 }
 
@@ -85,8 +83,10 @@ impl CodeGenManager<'_> {
         }
 
         self.current_fn = Some(sym(&fn_name));
+        // Top level `codegen` call.  See codegen_expr.
         let body_val = self.codegen(body);
         self.builder.build_return(Some(&body_val)).unwrap();
+        self.current_fn = None;
         self.variables.exit_scope();
         fn_val.verify(true);
     }
@@ -107,7 +107,7 @@ impl CodeGenManager<'_> {
         }
     }
 
-    pub fn code_all_method_bodies(&mut self) {
+    pub fn code_all_method_definitions(&mut self) {
         self.code_native_method_bodies();
         self.code_program_method_bodies();
     }

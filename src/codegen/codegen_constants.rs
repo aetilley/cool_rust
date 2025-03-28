@@ -9,8 +9,6 @@ pub const INT: &str = "Int";
 pub const STRING: &str = "String";
 
 // Method Names
-pub const LENGTH: &str = "length";
-
 pub const SELF: &str = "self";
 pub const INIT: &str = "init";
 pub const TRUE: &str = "true";
@@ -33,6 +31,7 @@ pub const STRING_CONTENT_IND: u32 = 2;
 pub const STRING_FORMATTER: &str = "%s\0";
 pub const INT_FORMATTER: &str = "%d\0";
 pub const MAX_IN_STRING_LEN: u64 = 100;
+pub const MEMCPY_ALIGNMENT: u32 = 8;
 
 pub const OUT_STRING: &str = "out_string";
 pub const IN_STRING: &str = "in_string";
@@ -43,7 +42,8 @@ pub const MIN_BOUND_FINDER: &str = "min_bound_finder";
 pub const TYPE_IS_MEMBER: &str = "type_is_member";
 pub const CASE_SELECTOR: &str = "case_selector";
 pub const CONCAT: &str = "concat";
-pub const SUBSTRING: &str = "substr";
+pub const SUBSTR: &str = "substr";
+pub const LENGTH: &str = "length";
 pub const ABORT: &str = "abort";
 pub const COPY: &str = "copy";
 pub const TYPE_NAME: &str = "type_name";

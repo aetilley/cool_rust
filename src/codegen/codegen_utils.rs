@@ -9,12 +9,37 @@ use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::IntPredicate;
 
 impl<'ctx> CodeGenManager<'ctx> {
-    pub fn get_function_type_from_signature(
+    pub fn sym_to_llvm_type(&self, typ: &Sym) -> BasicTypeEnum {
+        if self.ct.native_classes.contains(typ) || self.ct.program_classes.contains(typ) {
+            return BasicTypeEnum::StructType(
+                self.context
+                    .get_struct_type(typ)
+                    .unwrap_or_else(|| panic!("No struct type for {}", typ)),
+            );
+        }
+        panic!("Cannot convert Sym {} to type", typ);
+    }
+
+    pub fn sym_to_class_id_int_val(&self, s: &Sym) -> IntValue<'ctx> {
+        // Lookup class id for a Sym.
+        self.i32_ty.const_int(
+            self.ct
+                .class_id
+                .get(s)
+                .unwrap_or_else(|| panic!("No class id found for {}", s))
+                .to_owned()
+                .try_into()
+                .unwrap(),
+            false,
+        )
+    }
+
+    pub fn get_method_type_from_signature(
         &self,
         parameters: &[Formal],
         _return_type: &Sym,
     ) -> FunctionType<'ctx> {
-        // Everything is a pointer.
+        // (Everything is a pointer.)
         let args_types = std::iter::repeat(self.ptr_ty)
             .take(parameters.len())
             .map(|f| f.into())
@@ -25,7 +50,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     pub fn code_function_entry(&self, fn_name: &str) -> (FunctionValue<'ctx>, BasicBlock<'ctx>) {
-        // For predeclared functions only!
+        // For predeclared functions only! (Function must exist in module.)
         let fn_val = self
             .module
             .get_function(fn_name)
@@ -37,6 +62,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     pub fn code_array_value_from_sym(&self, s: &Sym) -> ArrayValue<'ctx> {
+        // Given a symbol, return a constant character array for it.
         let array_values: Vec<IntValue> = s
             .as_bytes()
             .iter()
@@ -46,6 +72,8 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     pub fn code_array_ptr_from_sym(&self, s: &Sym) -> PointerValue<'ctx> {
+        // Given a symbol, create create a character array for it and
+        // return a pointer to this array.
         let array = self.code_array_value_from_sym(s);
         let array_ptr = self
             .builder
@@ -62,6 +90,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     pub fn code_new_string_from_ptr(&self, str_array_ptr: PointerValue) -> PointerValue<'ctx> {
+        // Create a new Cool String with content given by the given content array.
         let new_ptr = self.code_new_and_init(&sym("String"));
 
         // Get length
@@ -102,6 +131,7 @@ impl<'ctx> CodeGenManager<'ctx> {
     }
 
     pub fn code_new_int(&self, int_val: IntValue) -> PointerValue<'ctx> {
+        // Create a new Cool Int and return a pointer to it.
         let new_ptr = self.code_new_and_init(&sym("Int"));
 
         let field = self
@@ -113,7 +143,21 @@ impl<'ctx> CodeGenManager<'ctx> {
         new_ptr
     }
 
+    pub fn code_new_bool(&self, int_val: IntValue) -> PointerValue<'ctx> {
+        // Create a new Cool Bool and return a pointer to it.
+        let new_ptr = self.code_new_and_init(&sym("Bool"));
+
+        let field = self
+            .builder
+            .build_struct_gep(self.cl_int_ty, new_ptr, BOOL_VAL_IND, "gep")
+            .unwrap();
+        self.builder.build_store(field, int_val).unwrap();
+
+        new_ptr
+    }
+
     pub fn code_new_and_init(&self, typ: &Sym) -> PointerValue<'ctx> {
+        // Create a new Cool object of type `typ`, run its initializer, and return a pointer to it.
         let struct_type = self
             .context
             .get_struct_type(typ)
@@ -139,7 +183,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         field_offset: u32,
         pointer_to_store: PointerValue<'ctx>,
     ) {
-        // Basically just a helper function to do a gep then a load.
+        // A helper function to do a gep then a store.
         let field = self
             .builder
             .build_struct_gep(
@@ -152,13 +196,33 @@ impl<'ctx> CodeGenManager<'ctx> {
         self.builder.build_store(field, pointer_to_store).unwrap();
     }
 
+    pub fn store_int_value_into_pointer_at_struct(
+        &self,
+        ptr_at_struct: PointerValue<'ctx>,
+        struct_type_name: &str,
+        field_offset: u32,
+        int_to_store: IntValue<'ctx>,
+    ) {
+        // A helper function to do a gep then a store.
+        let field = self
+            .builder
+            .build_struct_gep(
+                self.context.get_struct_type(struct_type_name).unwrap(),
+                ptr_at_struct,
+                field_offset,
+                "Field",
+            )
+            .unwrap();
+        self.builder.build_store(field, int_to_store).unwrap();
+    }
+
     pub fn load_pointer_field_from_pointer_at_struct(
         &self,
         ptr_at_struct: PointerValue<'ctx>,
         struct_type_name: &str,
         field_offset: u32,
     ) -> PointerValue<'ctx> {
-        // Basically just a helper function to do a gep then a load.
+        // A helper function to do a gep then a load.
         let field = self
             .builder
             .build_struct_gep(
@@ -180,7 +244,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         int_type: IntType<'ctx>,
         field_offset: u32,
     ) -> IntValue<'ctx> {
-        // Basically just a helper function to do a gep then a load.
+        // A helper function to do a gep then a load.
         let field = self
             .builder
             .build_struct_gep(
@@ -196,48 +260,20 @@ impl<'ctx> CodeGenManager<'ctx> {
             .into_int_value()
     }
 
-    pub fn get_bool_for_value(
-        &self,
-        pred: IntValue,
-        parent: Option<FunctionValue>,
-    ) -> PointerValue<'ctx> {
-        let then_val = self
-            .module
-            .get_global(&global_bool_ref(true))
-            .unwrap()
-            .as_pointer_value();
-
-        let else_val = self
-            .module
-            .get_global(&global_bool_ref(false))
-            .unwrap()
-            .as_pointer_value();
-
-        self.cond_builder(pred, || then_val, || else_val, self.ptr_ty.into(), parent)
-            .into_pointer_value()
-    }
-
     pub fn cond_builder<Ret: BasicValue<'ctx>, F1: Fn() -> Ret, F2: Fn() -> Ret>(
         &self,
         pred: IntValue,
         then_fn: F1,
         else_fn: F2,
         typ: BasicTypeEnum<'ctx>,
-        parent: Option<FunctionValue>,
+        parent: FunctionValue,
     ) -> BasicValueEnum<'ctx> {
-        // Allows us to return the globals instead of allocating a new boolean each time.
+        // For then and else actions that do not mutate self, we can encapsulate
+        // much of the conditional building machinery in this helper.
 
-        let p = match parent {
-            None => self
-                .module
-                .get_function(self.current_fn.as_ref().unwrap())
-                .unwrap(),
-            Some(fn_val) => fn_val,
-        };
-
-        let then_bb = self.context.append_basic_block(p, "then");
-        let else_bb = self.context.append_basic_block(p, "else");
-        let cont_bb = self.context.append_basic_block(p, "ifcont");
+        let then_bb = self.context.append_basic_block(parent, "then");
+        let else_bb = self.context.append_basic_block(parent, "else");
+        let cont_bb = self.context.append_basic_block(parent, "ifcont");
 
         self.builder
             .build_conditional_branch(pred, then_bb, else_bb)
@@ -271,6 +307,7 @@ impl<'ctx> CodeGenManager<'ctx> {
         phi_basic
     }
 
+    //
     // Utils for Typcase
 
     pub fn code_is_member_of_set(
@@ -377,7 +414,7 @@ impl<'ctx> CodeGenManager<'ctx> {
             return_arg_type,
             recurse,
             self.i32_ty.into(),
-            Some(fn_val),
+            fn_val,
         );
 
         self.builder.build_return(Some(&result)).unwrap();
