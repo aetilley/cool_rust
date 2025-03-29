@@ -120,7 +120,7 @@ impl Program {
     pub fn to_llvm(&self, out_file: &str) {
         let context = Context::create();
         let man = CodeGenManager::from(&context, self);
-        //man.module.verify().unwrap();
+        man.module.verify().unwrap();
         man.module.print_to_file(out_file).unwrap();
     }
 }
@@ -141,8 +141,10 @@ mod codegen_tests {
     use std::{env, fs};
 
     fn compile_run_assert_output_contains(code: &str, output: &str) {
-        let mut program = Program::parse_from(code).unwrap();
-        program.semant().unwrap();
+        let mut program = Program::parse_from(code).expect("Could not parse program.");
+        program
+            .semant()
+            .expect("Semantic analysis failed for program.");
         program.to_llvm("test_tmp.ll");
         run_assert_output_contains("test_tmp.ll", output);
     }
@@ -275,6 +277,7 @@ class Main {
     }
 
     // #[test]
+    // TODO: How to test with console input?
     fn test_codegen_simple_in_string() {
         todo!();
     }
