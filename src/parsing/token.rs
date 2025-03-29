@@ -148,56 +148,55 @@ pub enum Token {
     StrConst(Result<String, StringLiteralError>),
 
     // Keywords.
-    // TODO: in the spec these are actually case insensitive.
-    #[regex("class")]
+    #[regex("(?i)class")]
     Class,
 
-    #[regex("else")]
+    #[regex("(?i)else")]
     Else,
 
-    #[regex("fi")]
+    #[regex("(?i)fi")]
     Fi,
 
-    #[regex("if")]
+    #[regex("(?i)if")]
     If,
 
-    #[regex("in")]
+    #[regex("(?i)in")]
     In,
 
-    #[regex("inherits")]
+    #[regex("(?i)inherits")]
     Inherits,
 
-    #[regex("isvoid")]
+    #[regex("(?i)isvoid")]
     IsVoid,
 
-    #[regex("let")]
+    #[regex("(?i)let")]
     Let,
 
-    #[regex("loop")]
+    #[regex("(?i)loop")]
     Loop,
 
-    #[regex("pool")]
+    #[regex("(?i)pool")]
     Pool,
 
-    #[regex("then")]
+    #[regex("(?i)then")]
     Then,
 
-    #[regex("while")]
+    #[regex("(?i)while")]
     While,
 
-    #[regex("case")]
+    #[regex("(?i)case")]
     Case,
 
-    #[regex("esac")]
+    #[regex("(?i)esac")]
     Esac,
 
-    #[regex("new")]
+    #[regex("(?i)new")]
     New,
 
-    #[regex("of")]
+    #[regex("(?i)of")]
     Of,
 
-    #[regex("not")]
+    #[regex("(?i)not")]
     Not,
 
     // Error

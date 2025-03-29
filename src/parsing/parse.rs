@@ -677,4 +677,12 @@ mod parse_tests {
         assert_eq!(result_times, desired_result_times);
         assert_eq!(result_divide, desired_result_divide);
     }
+
+    #[test]
+    fn test_keyword_case_insensitivity() {
+        let code: &str = r"
+        ClAss Apple {};
+        ";
+        Program::parse(code).expect("Test code failed to parse");
+    }
 }

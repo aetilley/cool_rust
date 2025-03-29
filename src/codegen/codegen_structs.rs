@@ -31,7 +31,7 @@ impl CodeGenManager<'_> {
         // Start with class_id
         let mut all_attr_types: Vec<BasicTypeEnum> = vec![self.i32_ty.into()];
 
-        let class_attrs = self.ct.get_all_attrs(name);
+        let class_attrs = self.ct.get_attrs(name).unwrap();
         let field_types: Vec<BasicTypeEnum> = vec![self.ptr_ty.into(); class_attrs.len()];
 
         all_attr_types.extend(field_types);

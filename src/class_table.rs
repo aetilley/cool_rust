@@ -77,7 +77,7 @@ impl ClassTable {
                 &class_methods,
                 &mut class_vtable,
                 &mut class_method_order,
-            );
+            )?;
         }
 
         let mut class_id = HashMap::<Sym, i32>::new();
@@ -281,7 +281,7 @@ impl ClassTable {
         class_methods: &ClassMethodTy,
         class_vtable: &mut ClassVTableTy,
         class_method_order: &mut ClassMethodOrderTy,
-    ) {
+    ) -> Result<(), SemanticAnalysisError> {
         let mut vtable = HashMap::<Sym, Sym>::new();
         let mut method_order = Vec::<Sym>::new();
 
@@ -294,7 +294,7 @@ impl ClassTable {
                     class_methods,
                     class_vtable,
                     class_method_order,
-                );
+                )?;
             }
             vtable = class_vtable.get(parent).unwrap().clone();
             method_order = class_method_order.get(parent).unwrap().clone();
@@ -323,6 +323,8 @@ impl ClassTable {
         }
         class_vtable.insert(cls.clone(), vtable);
         class_method_order.insert(cls.clone(), method_order);
+
+        Ok(())
     }
 
     pub fn get_max_vtable_size(&self) -> usize {
@@ -333,17 +335,39 @@ impl ClassTable {
             .unwrap()
     }
 
-    // TODO make this return Result
-    pub fn get_all_attrs(&self, name: &Sym) -> Vec<AttrTypeInit> {
+    fn get_all_attrs(&self, name: &Sym) -> Result<Vec<AttrTypeInit>, SemanticAnalysisError> {
+        let mut all_attrs = match self.class_parent.get(name) {
+            Some(parent) => self.get_all_attrs(parent)?,
+            None => vec![],
+        };
+
+        let local_attrs = match self.class_attrs.get(name) {
+            None => {
+                let msg = format!("Class {} not found.", name);
+                return Err(SemanticAnalysisError { msg });
+            }
+            Some(attrs) => attrs,
+        };
+        for attr in local_attrs {
+            all_attrs.push(attr.clone())
+        }
+
+        Ok(all_attrs)
+    }
+
+    pub fn get_attrs(&self, name: &Sym) -> Result<Vec<AttrTypeInit>, SemanticAnalysisError> {
         // Get attrs of class `name` and of all ancestors.
-        let mut result = Vec::<AttrTypeInit>::new();
-        if let Some(parent) = self.class_parent.get(name) {
-            result = self.get_all_attrs(parent);
+        let all_attrs = self.get_all_attrs(name);
+        match all_attrs {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                let msg = format!(
+                    "While getting attributes for {} and all its ancestors, got the following error {}.",
+                    name, err.msg
+                );
+                Err(SemanticAnalysisError { msg })
+            }
         }
-        for attr in self.class_attrs.get(name).unwrap() {
-            result.push(attr.clone())
-        }
-        result
     }
 
     pub fn get_method(
@@ -371,6 +395,7 @@ impl ClassTable {
         class_name: &Sym,
         method_name: &Sym,
     ) -> Result<MethodTy, SemanticAnalysisError> {
+        // Search for method in class `class_name` or in any ancestor.
         if let Ok(method) = self.get_method(class_name, method_name) {
             return Ok(method);
         }

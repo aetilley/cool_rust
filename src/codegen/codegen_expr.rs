@@ -25,7 +25,7 @@ impl<'ctx> CodeGenManager<'ctx> {
 
                 // else check attributes
                 let cls = self.current_class.clone().unwrap();
-                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_all_attrs(&cls);
+                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_attrs(&cls).unwrap();
                 if let Some(offset) = attrs.iter().position(|(name, _, _)| name == id) {
                     let field_offset: u32 =
                         <usize as TryInto<u32>>::try_into(offset).unwrap() + OBJECT_PREFIX_SIZE;
@@ -59,7 +59,7 @@ impl<'ctx> CodeGenManager<'ctx> {
                 // Otherwise check attrs
 
                 let cls = self.current_class.clone().unwrap();
-                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_all_attrs(&cls);
+                let attrs: Vec<(Sym, Sym, Expr)> = self.ct.get_attrs(&cls).unwrap();
                 if let Some(offset) = attrs.iter().position(|(name, _, _)| name == id) {
                     let field_offset: u32 =
                         <usize as TryInto<u32>>::try_into(offset).unwrap() + OBJECT_PREFIX_SIZE;
